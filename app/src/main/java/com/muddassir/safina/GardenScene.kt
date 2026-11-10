@@ -18,12 +18,6 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /* ---------- helpers ---------- */
-private fun lerpF(a: Float, b: Float, t: Float) = a + (b - a) * t
-
-/** 0..1 progress of p inside [from, to] */
-private fun seg(p: Float, from: Float, to: Float) = ((p - from) / (to - from)).coerceIn(0f, 1f)
-private fun smooth(t: Float) = t * t * (3f - 2f * t)
-
 /** Green spread radius as a fraction of the screen width. */
 private fun grassRadius(p: Float): Float = when {
     p <= 0.05f -> lerpF(0f, 0.12f, p / 0.05f)
@@ -630,13 +624,6 @@ private fun DrawScope.rainbow(w: Float, horizon: Float, rb: Float, golden: Float
     }
 }
 
-private fun DrawScope.cloud(x: Float, y: Float, s: Float, c: Color) {
-    drawCircle(c, s * 0.50f, Offset(x, y))
-    drawCircle(c, s * 0.68f, Offset(x + s * 0.55f, y - s * 0.22f))
-    drawCircle(c, s * 0.52f, Offset(x + s * 1.15f, y - s * 0.02f))
-    drawOval(c, Offset(x - s * 0.55f, y - s * 0.05f), Size(s * 2.3f, s * 0.62f))
-}
-
 private fun DrawScope.tree(
     bx: Float, by: Float, s: Float,
     leafDots: Float, canopy: Float, fruit: Float,
@@ -768,6 +755,25 @@ private fun DrawScope.dragonfly(x: Float, y: Float, s: Float, w: Float) {
     drawOval(Color.White.copy(alpha = 0.28f), Offset(x - s * 0.4f, y - s * 0.15f), Size(s * 0.9f, s * 0.45f))
     drawOval(Color.White.copy(alpha = 0.28f), Offset(x + s * 0.1f, y - s * 0.15f), Size(s * 0.9f, s * 0.45f))
     drawCircle(body, s * 0.18f, Offset(x + s * 1.4f, y))
+}
+
+/** The original garden as a Scene, unchanged visually. */
+object GardenScene : Scene {
+    override val id = "garden"
+    override val palette = ScenePalette(Color(0xFF6DB84C), Color(0xFFFFE9A0))
+    override val tapAnchor = Offset(0.5f, 0.80f)
+    override val labels = listOf("Drop", "Pond", "Meadow", "Garden")
+    override fun textColor(progress: Float) = Color(0xFF5A4326)
+    override fun DrawScope.draw(frame: SceneFrame) = drawGarden(
+        p = frame.progress,
+        t = frame.time,
+        pulse = frame.pulse,
+        ripple = frame.ripple,
+        shimmer = frame.shimmer,
+        golden = frame.golden,
+        celebrate = frame.celebrate,
+        calm = frame.calm
+    )
 }
 
 private fun DrawScope.fish(x: Float, y: Float, s: Float, w: Float) {
