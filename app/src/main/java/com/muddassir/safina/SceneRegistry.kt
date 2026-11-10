@@ -1,6 +1,9 @@
 package com.muddassir.safina
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 /** A dhikr entry: what is recited, on which scene, how far the user has got. */
 data class Zikr(
@@ -42,8 +45,28 @@ fun defaultZikrs(): List<Zikr> = Scenes.all.map { scene ->
     )
 }
 
+const val MAX_HTML_BYTES = 2 * 1024 * 1024
+const val HTML_SCENE_PREFIX = "html:"
+
+/** An uploaded HTML scene file in internal storage. */
+data class HtmlSceneMeta(
+    val id: String,
+    val name: String,
+    val fileName: String,
+    val addedAt: Long
+)
+
+private fun customZikrFor(meta: HtmlSceneMeta, count: Int) = Zikr(
+    id = "zikr_html_${meta.id}",
+    arabic = ASTAGHFIRULLAH,
+    translation = ASTAGHFIRULLAH_EN,
+    target = DEFAULT_TARGET,
+    sceneId = "$HTML_SCENE_PREFIX${meta.id}",
+    count = count
+)
+
 /** Single storage entry point, so a later swap to DataStore/Room touches only this class. */
-class ZikrStore(context: Context) {
+class ZikrStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("zikr", Context.MODE_PRIVATE)
     private val legacy = context.getSharedPreferences("tally", Context.MODE_PRIVATE)
 
@@ -72,4 +95,75 @@ class ZikrStore(context: Context) {
         set(value) {
             prefs.edit().putString("last_scene", value).apply()
         }
+
+    /* ---------- uploaded HTML scenes ---------- */
+
+    /** Native scenes first, then the user's uploaded ones, in upload order. */
+    fun loadPages(): List<Zikr> = load() + customZikrs()
+
+    fun customZikrs(): List<Zikr> = customScenes().map { meta ->
+        customZikrFor(meta, countFor("zikr_html_${meta.id}"))
+    }
+
+    fun countFor(zikrId: String): Int = prefs.getInt("count_$zikrId", 0)
+
+    fun customScenes(): List<HtmlSceneMeta> = runCatching {
+        val arr = JSONArray(prefs.getString("custom_scenes", "[]"))
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            HtmlSceneMeta(
+                id = o.getString("id"),
+                name = o.getString("name"),
+                fileName = o.getString("fileName"),
+                addedAt = o.optLong("addedAt")
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    private fun saveCustomScenes(list: List<HtmlSceneMeta>) {
+        val arr = JSONArray()
+        list.forEach { m ->
+            arr.put(
+                JSONObject()
+                    .put("id", m.id)
+                    .put("name", m.name)
+                    .put("fileName", m.fileName)
+                    .put("addedAt", m.addedAt)
+            )
+        }
+        prefs.edit().putString("custom_scenes", arr.toString()).apply()
+    }
+
+    fun addCustomScene(meta: HtmlSceneMeta) = saveCustomScenes(customScenes() + meta)
+
+    fun renameCustomScene(id: String, name: String) {
+        saveCustomScenes(customScenes().map { if (it.id == id) it.copy(name = name) else it })
+    }
+
+    fun removeCustomScene(id: String) {
+        saveCustomScenes(customScenes().filterNot { it.id == id })
+        prefs.edit().remove("count_zikr_html_$id").apply()
+        deleteHtml(id)
+    }
+
+    private fun sceneDir(): File = File(context.filesDir, "scenes").apply { mkdirs() }
+
+    fun htmlFile(id: String): File = File(sceneDir(), "$id.html")
+
+    fun saveHtml(id: String, bytes: ByteArray): Boolean = runCatching {
+        require(bytes.isNotEmpty() && bytes.size <= MAX_HTML_BYTES)
+        htmlFile(id).writeBytes(bytes)
+        true
+    }.getOrDefault(false)
+
+    fun readHtml(id: String): String? = runCatching {
+        val file = htmlFile(id)
+        if (file.exists() && file.length() in 1..MAX_HTML_BYTES.toLong()) {
+            file.readText(Charsets.UTF_8)
+        } else null
+    }.getOrNull()
+
+    fun deleteHtml(id: String) {
+        runCatching { htmlFile(id).delete() }
+    }
 }

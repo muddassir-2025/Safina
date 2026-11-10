@@ -1,0 +1,54 @@
+Create a single-file HTML canvas animation scene for a calm dhikr counter app, based on this idea: [I will describe my idea after this message].
+
+The scene is background artwork only. It runs inside a hidden, sandboxed WebView behind a native counter UI. The user must never feel they are looking at a website: no browser chrome, no text, no scrolling, no zoom, no flash.
+
+FILE RULES
+- One self-contained .html file: HTML, CSS and JavaScript all inline. Under 2 MB.
+- No network of any kind: no external scripts, fonts, images, fetch, XMLHttpRequest, WebSocket or iframes. Any image must be a data: URI.
+- One full-screen <canvas> that fills the viewport, handles devicePixelRatio, and redraws on resize.
+- Draw in portrait. Keep the top ~35% of the screen calm and low-contrast, because the app draws the Arabic text and the count number there.
+- Base style includes: html, body { margin:0; overflow:hidden; background:transparent; touch-action:none; user-select:none; }
+- Draw no text at all. All text is drawn by the app.
+
+HOST API (the page must define exactly this global object)
+window.zikrScene = {
+  // The app calls this once at the start with the saved progress, 0..1.
+  // Show that state immediately, with no animation.
+  init(p) { },
+  // The app calls this whenever the count changes. p is the new progress, 0..1.
+  // Ease toward it smoothly over about 600-800 ms. Never jump.
+  setProgress(p) { },
+  // Called on each tap. nx, ny are the tap position as 0..1 of the screen.
+  // Play a soft, cheap tap effect (ripple, drop, glow). Taps are frequent.
+  tap(nx, ny) { },
+  // Called when the page is not visible or the app is backgrounded. Stop drawing when true.
+  setPaused(paused) { }
+};
+
+The app injects window.ZikrHost (it is absent when the file is opened in a normal browser, so always guard with if (window.ZikrHost)):
+- ZikrHost.ready(): call once, after the first frame has been drawn. The app fades the scene in only after this.
+- ZikrHost.setTextTheme('dark' | 'light'): which text colour is readable on your scene right now. Call it once at the start and again whenever the background brightness changes with progress (for example when a bright day becomes dusk). The app blends the colour smoothly.
+- ZikrHost.milestone(fraction): optional one-off effect at 0.25, 0.5, 0.75, 1.
+
+BROWSER TESTING
+When window.ZikrHost is absent, show a small debug slider (0-100) in a corner and make clicks call tap(), so the scene can be tuned in any browser. When ZikrHost is present, show no debug UI.
+
+PERFORMANCE AND MOOD
+- Target 60 fps on a mid-range phone: precompute random scenery with a seeded generator, cap particles (about 300), avoid per-frame allocations, and stop all drawing when setPaused(true).
+- Calm, soft, gentle, slow motion. No flashing and no sudden movement.
+
+STYLE GUIDE
+- Flat, soft storybook illustration with gentle colours and no outlines.
+- Elements appear gradually across progress 0 -> 1, using a suggested timeline:
+  0.00-0.10 the base state is already settled;
+  0.10-0.35 the first change arrives;
+  0.35-0.60 the scene fills in;
+  0.60-0.85 details and small animals appear;
+  0.85-1.00 everything comes together, ending in a beautiful finished state at progress = 1.
+- Add one small, cheap effect on tap at the focal point (a ring, a drop, a glow).
+- Make the finished state at progress = 1 the most beautiful moment, and keep gentle idle motion forever.
+
+READABILITY RULE
+- Keep the top 35% calm and low-contrast, draw no text, and call ZikrHost.setTextTheme correctly: 'light' when the background there is light, 'dark' when it is dark, including when that changes with progress.
+
+Reply with only the complete HTML file in one code block. If I ask for changes later, send me the complete updated file again.
