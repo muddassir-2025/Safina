@@ -70,7 +70,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SceneStudioScreen(
+private fun LegacySceneStudioScreen(
     time: Float,
     scenes: List<HtmlSceneMeta>,
     settings: SettingsActions,

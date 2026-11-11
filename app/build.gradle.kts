@@ -3,6 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Backend deployed on Neon (Function `api`, production branch).
+// Local dev: -Psafina.apiBaseUrl=http://10.0.2.2:8080
+val safinaApiBaseUrl = (project.findProperty("safina.apiBaseUrl") as String?)
+    ?: "https://br-quiet-dew-a1bz1a6p-api.compute.c-1.ap-southeast-1.aws.neon.tech"
+
 android {
     namespace = "com.muddassir.safina"
     compileSdk {
@@ -19,6 +24,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "API_BASE_URL", "\"$safinaApiBaseUrl\"")
+        buildConfigField("String", "AUTH_REDIRECT", "\"safina://auth\"")
     }
 
     buildTypes {
@@ -47,6 +55,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.okhttp)
+    implementation(libs.androidx.browser)
+    implementation(libs.androidx.security.crypto)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

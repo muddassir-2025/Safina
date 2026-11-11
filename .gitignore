@@ -13,3 +13,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+.neon
+node_modules/
+dist/
+
+# Secrets pulled by `neon deploy` — never commit these.
+.env
+.env.*
+!.env.example

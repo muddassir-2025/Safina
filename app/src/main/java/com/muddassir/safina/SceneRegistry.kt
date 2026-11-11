@@ -88,15 +88,38 @@ fun defaultZikrs(): List<Zikr> = listOf(
     )
 )
 
-const val MAX_HTML_BYTES = 2 * 1024 * 1024
+/** Scene files are capped at 1 MB, both on device and on the server. */
+const val MAX_HTML_BYTES = 1024 * 1024
 const val HTML_SCENE_PREFIX = "html:"
 
-/** An uploaded HTML scene file in internal storage. */
+const val SCENE_SOURCE_DEFAULT = "default"
+const val SCENE_SOURCE_PRIVATE = "private"
+const val SCENE_SOURCE_PUBLIC = "public"
+
+/**
+ * An HTML scene file in internal storage.
+ *
+ * Default scenes are seeded from bundled assets (or fetched from the server for
+ * admin-managed defaults). A user can replace/rename one; [modified] then marks it
+ * so a later server sync never overwrites their copy. Public entries are the user's
+ * saved community scenes, cached locally so they keep working offline.
+ */
 data class HtmlSceneMeta(
     val id: String,
     val name: String,
     val fileName: String,
-    val addedAt: Long
+    val addedAt: Long,
+    val isDefault: Boolean = false,
+    /** Bundled key ("dawn_garden") or the server default-scene id. */
+    val defaultKey: String? = null,
+    val modified: Boolean = false,
+    val source: String = SCENE_SOURCE_PRIVATE,
+    val remoteId: String? = null,
+    val author: String? = null,
+    val savedCount: Int = 0,
+    val version: Int = 0,
+    val removed: Boolean = false,
+    val collectionId: String? = null
 )
 
 private fun customZikrFor(meta: HtmlSceneMeta, count: Int) = Zikr(
@@ -157,11 +180,111 @@ class ZikrStore(private val context: Context) {
             HtmlSceneMeta(
                 id = o.getString("id"),
                 name = o.getString("name"),
-                fileName = o.getString("fileName"),
-                addedAt = o.optLong("addedAt")
+                fileName = o.optString("fileName", "${o.getString("id")}.html"),
+                addedAt = o.optLong("addedAt"),
+                isDefault = o.optBoolean("isDefault", false),
+                defaultKey = o.optString("defaultKey").ifBlank { null },
+                modified = o.optBoolean("modified", false),
+                source = o.optString("source", SCENE_SOURCE_PRIVATE),
+                remoteId = o.optString("remoteId").ifBlank { null },
+                author = o.optString("author").ifBlank { null },
+                savedCount = o.optInt("savedCount", 0),
+                version = o.optInt("version", 0),
+                removed = o.optBoolean("removed", false),
+                collectionId = o.optString("collectionId").ifBlank { null }
             )
         }
     }.getOrDefault(emptyList())
+
+    fun privateScenes(): List<HtmlSceneMeta> =
+        customScenes().filter { it.source == SCENE_SOURCE_PRIVATE }
+
+    fun defaultScenes(): List<HtmlSceneMeta> =
+        customScenes().filter { it.isDefault && it.source == SCENE_SOURCE_DEFAULT }
+
+    fun savedPublicScenes(): List<HtmlSceneMeta> =
+        customScenes().filter { it.source == SCENE_SOURCE_PUBLIC }
+
+    /**
+     * Copies the six bundled scenes into the user's local scene list exactly once.
+     * Existing (possibly edited) copies are never overwritten.
+     */
+    fun ensureBundledDefaults() {
+        var list = customScenes()
+        var changed = false
+        BundledScenes.all.forEach { bundled ->
+            val id = "default_${bundled.key}"
+            if (list.none { it.id == id || (it.isDefault && it.defaultKey == bundled.key) }) {
+                val bytes = readAsset(bundled.asset)
+                if (bytes != null && bytes.size <= MAX_HTML_BYTES && saveHtml(id, bytes)) {
+                    list = list + HtmlSceneMeta(
+                        id = id,
+                        name = bundled.title,
+                        fileName = "$id.html",
+                        addedAt = 0L,
+                        isDefault = true,
+                        defaultKey = bundled.key,
+                        modified = false,
+                        source = SCENE_SOURCE_DEFAULT
+                    )
+                    changed = true
+                }
+            }
+        }
+        if (changed) saveCustomScenes(list)
+    }
+
+    /** Restores a bundled default from assets, discarding the user's local edit. */
+    fun resetBundledDefault(id: String): Boolean {
+        val meta = customScenes().firstOrNull { it.id == id } ?: return false
+        val bytes = when {
+            meta.defaultKey != null -> BundledScenes.byKey(meta.defaultKey)?.let { readAsset(it.asset) }
+            else -> null
+        } ?: runCatching { htmlFile("$id.orig").takeIf { it.exists() }?.readBytes() }.getOrNull()
+            ?: return false
+        if (!saveHtml(id, bytes)) return false
+        deleteThumbnail(id)
+        val title = BundledScenes.byKey(meta.defaultKey)?.title ?: meta.name
+        saveCustomScenes(
+            customScenes().map {
+                if (it.id == id) it.copy(name = title, modified = false, version = 0) else it
+            }
+        )
+        return true
+    }
+
+    /** Keeps an edited default visible in Private when the server removes/updates it. */
+    fun moveSceneToPrivate(id: String): Boolean {
+        val meta = customScenes().firstOrNull { it.id == id } ?: return false
+        saveCustomScenes(
+            customScenes().map {
+                if (it.id == id) it.copy(
+                    source = SCENE_SOURCE_PRIVATE,
+                    isDefault = false,
+                    modified = true
+                ) else it
+            }
+        )
+        return true
+    }
+
+    fun updateSceneMeta(id: String, transform: (HtmlSceneMeta) -> HtmlSceneMeta) {
+        saveCustomScenes(customScenes().map { if (it.id == id) transform(it) else it })
+    }
+
+    fun upsertSavedPublic(meta: HtmlSceneMeta, bytes: ByteArray?) {
+        if (bytes != null && !saveHtml(meta.id, bytes)) return
+        val list = customScenes().filterNot { it.id == meta.id }
+        saveCustomScenes(list + meta.copy(source = SCENE_SOURCE_PUBLIC))
+    }
+
+    fun removePublicScene(id: String) {
+        saveCustomScenes(customScenes().filterNot { it.id == id })
+        deleteHtml(id)
+    }
+
+    fun readAsset(name: String): ByteArray? =
+        runCatching { context.assets.open(name).use { it.readBytes() } }.getOrNull()
 
     /* ---------- dhikr cards (the dashboard list) ---------- */
 
@@ -264,6 +387,16 @@ class ZikrStore(private val context: Context) {
                     .put("name", m.name)
                     .put("fileName", m.fileName)
                     .put("addedAt", m.addedAt)
+                    .put("isDefault", m.isDefault)
+                    .put("defaultKey", m.defaultKey ?: "")
+                    .put("modified", m.modified)
+                    .put("source", m.source)
+                    .put("remoteId", m.remoteId ?: "")
+                    .put("author", m.author ?: "")
+                    .put("savedCount", m.savedCount)
+                    .put("version", m.version)
+                    .put("removed", m.removed)
+                    .put("collectionId", m.collectionId ?: "")
             )
         }
         prefs.edit().putString("custom_scenes", arr.toString()).apply()

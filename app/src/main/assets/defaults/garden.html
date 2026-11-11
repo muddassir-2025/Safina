@@ -1,0 +1,380 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Garden Scene</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:transparent;touch-action:none;user-select:none;-webkit-user-select:none;}
+  canvas{display:block;width:100vw;height:100vh;}
+  #dbg{position:fixed;left:10px;bottom:10px;right:10px;display:none;font:12px sans-serif;color:#5A4326;opacity:.75;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="dbg"><input id="slider" type="range" min="0" max="100" value="0" style="width:100%"></div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var W = 1, H = 1, DPR = 1;
+  var progress = 0, target = 0, time = 0, last = 0, running = false, paused = false;
+  var drops = [];
+  var hasHost = !!(window.ZikrHost);
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 3);
+    W = Math.max(1, Math.floor(window.innerWidth));
+    H = Math.max(1, Math.floor(window.innerHeight));
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+
+  function seg(p, a, b) { var v = (p - a) / (b - a); return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function smooth(t) { return t * t * (3 - 2 * t); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function mix(c1, c2, t) {
+    return [Math.round(lerp(c1[0], c2[0], t)), Math.round(lerp(c1[1], c2[1], t)), Math.round(lerp(c1[2], c2[2], t))];
+  }
+  function rgb(c, a) { return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + (a === undefined ? 1 : a) + ")"; }
+
+  // seeded scenery
+  var seed = 4242;
+  function rnd() { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
+  var flowerColors = [[255,255,255],[255,224,102],[255,158,196],[182,156,255],[255,164,92],[123,140,255]];
+  var flowers = [], blades = [], cracks = [], trees = [];
+  var i;
+  for (i = 0; i < 200; i++) flowers.push({x:rnd(), y:0.50 + rnd()*0.49, c:flowerColors[Math.floor(rnd()*flowerColors.length)], r:0.004+rnd()*0.005, o:rnd()});
+  for (i = 0; i < 340; i++) blades.push({x:rnd(), y:0.50 + rnd()*0.49, l:0.010+rnd()*0.016, o:rnd(), d:rnd() < 0.5});
+  for (i = 0; i < 40; i++) { var cx = rnd(), cy = 0.52 + rnd()*0.46; cracks.push({x1:cx,y1:cy,x2:cx+(rnd()-0.5)*0.16,y2:cy+(rnd()-0.5)*0.02}); }
+  trees = [[0.07,1.0],[0.21,0.55],[0.68,0.50],[0.86,1.10],[0.96,0.40]];
+
+  function hill(top, amp, color) {
+    ctx.beginPath();
+    ctx.moveTo(0, top);
+    ctx.bezierCurveTo(W*0.22, top-amp, W*0.42, top+amp*0.2, W*0.60, top-amp*0.15);
+    ctx.bezierCurveTo(W*0.78, top-amp*0.5, W*0.92, top+amp*0.1, W, top-amp*0.2);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fillStyle = color; ctx.fill();
+  }
+
+  function draw(dt) {
+    var p = progress;
+    var horizon = H * 0.50;
+    var pondX = W * 0.5, pondY = H * 0.80, prx = W * 0.28, pry = prx * 0.25;
+    var skyMix = seg(p, 0.35, 0.70);
+
+    // sky
+    var g = ctx.createLinearGradient(0, 0, 0, horizon);
+    g.addColorStop(0, rgb(mix([183,160,115], [135,186,212], skyMix)));
+    g.addColorStop(1, rgb(mix([217,194,138], [221,219,180], skyMix)));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, horizon + 2);
+
+    // rainbow at the end
+    var rb = seg(p, 0.97, 1);
+    if (rb > 0) {
+      var bands = [[255,90,90],[255,165,77],[255,224,102],[108,211,108],[90,180,255],[107,107,255],[177,107,255]];
+      var bw = W * 0.05 / 7;
+      for (var b = 0; b < 7; b++) {
+        ctx.beginPath();
+        ctx.arc(W/2, horizon, W*0.62 - b*bw, Math.PI, Math.PI * (1 + rb));
+        ctx.lineWidth = bw; ctx.strokeStyle = rgb(bands[b], 0.45 * rb); ctx.stroke();
+      }
+    }
+
+    // sun
+    var sunA = seg(p, 0.45, 0.70);
+    if (sunA > 0) {
+      var sx = W*0.86, sy = lerp(horizon + H*0.04, horizon - H*0.07, smooth(sunA)), sr = W*0.055;
+      var sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr*2.4);
+      sg.addColorStop(0, "rgba(255,233,168," + 0.55*sunA + ")");
+      sg.addColorStop(1, "rgba(255,233,168,0)");
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(sx, sy, sr*2.4, 0, 6.2832); ctx.fill();
+      ctx.fillStyle = "rgba(244,201,74," + sunA + ")"; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, 6.2832); ctx.fill();
+    }
+
+    // clouds
+    var storm = seg(p, 0.25, 0.40), clear = seg(p, 0.50, 0.65);
+    var cloudCol = mix(mix([244,235,211], [188,201,207], storm), [253,251,242], clear);
+    var drift = Math.sin(time * 6.2832) * W * 0.02;
+    function cloud(x, y, s, col) {
+      ctx.fillStyle = rgb(col);
+      ctx.beginPath(); ctx.arc(x, y, s*0.5, 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.arc(x+s*0.55, y-s*0.22, s*0.68, 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.arc(x+s*1.15, y-s*0.02, s*0.52, 0, 6.2832); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x+s*0.3, y+s*0.05, s*1.15, s*0.3, 0, 0, 6.2832); ctx.fill();
+    }
+    cloud(W*0.12 + drift, H*0.12, W*0.06, cloudCol);
+    cloud(W*0.82 + drift*0.85, H*0.15, W*0.065, cloudCol);
+    cloud(W*0.45 - drift*0.75, H*0.09, W*0.045, cloudCol);
+
+    // hills
+    var hillMix = seg(p, 0.20, 0.60);
+    hill(horizon, H*0.05, rgb(mix([169,164,141], [143,181,122], hillMix)));
+    hill(horizon + H*0.03, H*0.045, rgb(mix([184,152,95], [125,176,87], hillMix)));
+
+    // ground
+    ctx.fillStyle = rgb(mix([176,148,105], [190,186,160], seg(p, 0.05, 0.30)*0.5));
+    ctx.fillRect(0, horizon + H*0.02, W, H);
+    var crackA = 1 - seg(p, 0.10, 0.55);
+    if (crackA > 0.01) {
+      ctx.strokeStyle = "rgba(138,106,60," + (0.45*crackA) + ")"; ctx.lineWidth = W*0.0025;
+      for (i = 0; i < cracks.length; i++) {
+        ctx.beginPath(); ctx.moveTo(cracks[i].x1*W, cracks[i].y1*H);
+        ctx.lineTo(cracks[i].x2*W, cracks[i].y2*H); ctx.stroke();
+      }
+    }
+
+    // feathered green spread
+    var gR = (function (q) {
+      if (q <= 0.05) return lerp(0, 0.12, q/0.05);
+      if (q <= 0.30) return lerp(0.12, 0.45, (q-0.05)/0.25);
+      if (q <= 0.50) return lerp(0.45, 1.00, (q-0.30)/0.20);
+      return lerp(1.00, 1.70, seg(q, 0.50, 0.60));
+    })(p) * W;
+    var green = mix([106,155,58], [95,146,55], seg(p, 0.5, 1));
+    if (gR > 2) {
+      var gg = ctx.createRadialGradient(pondX, pondY, 0, pondX, pondY, gR);
+      gg.addColorStop(0, rgb(green));
+      gg.addColorStop(0.65, rgb(green));
+      gg.addColorStop(1, rgb(green, 0));
+      ctx.fillStyle = gg;
+      ctx.save(); ctx.beginPath(); ctx.rect(0, horizon + H*0.02, W, H); ctx.clip(); ctx.fillRect(0, 0, W, H); ctx.restore();
+    }
+
+    function inGrass(fx, fy) {
+      var dx = fx*W - pondX, dy = (fy*H - pondY) * 1.3;
+      return Math.sqrt(dx*dx + dy*dy) < gR;
+    }
+
+    // blades
+    for (i = 0; i < blades.length; i++) {
+      var bl = blades[i];
+      if (bl.o * 0.75 >= p || !inGrass(bl.x, bl.y)) continue;
+      var wave = Math.sin((time*2 - bl.x*1.6) * 6.2832);
+      var x = bl.x*W, y = bl.y*H;
+      ctx.strokeStyle = bl.d ? "rgba(63,122,42,.9)" : "rgba(121,185,75,.9)";
+      ctx.lineWidth = W*0.0035; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(x, y);
+      ctx.lineTo(x + wave*W*0.005, y - bl.l*H*(0.45 + 0.55*seg(p, bl.o*0.75, bl.o*0.75+0.25)));
+      ctx.stroke();
+    }
+
+    // flowers
+    for (i = 0; i < flowers.length; i++) {
+      var f = flowers[i];
+      var grow = smooth(seg(p, f.o*0.85, f.o*0.85 + 0.10));
+      if (grow <= 0 || !inGrass(f.x, f.y)) continue;
+      var persp = 0.55 + (f.y - 0.5) * 1.6;
+      var r = f.r * W * grow * persp;
+      ctx.fillStyle = rgb(f.c, 0.95);
+      ctx.beginPath(); ctx.arc(f.x*W, f.y*H, r, 0, 6.2832); ctx.fill();
+      if (i % 10 === 0 && r > W*0.0045) {
+        ctx.fillStyle = "rgba(255,246,208,.9)";
+        ctx.beginPath(); ctx.arc(f.x*W, f.y*H, r*0.35, 0, 6.2832); ctx.fill();
+      }
+    }
+
+    // trees
+    var leaf = seg(p, 0.20, 0.30), canopy = smooth(seg(p, 0.30, 0.45)), fruit = seg(p, 0.55, 0.85);
+    for (i = 0; i < trees.length; i++) {
+      var tx = trees[i][0]*W, ty = H*0.53, ts = trees[i][1], th = H*0.10*ts;
+      var swayX = Math.sin(time*6.2832)*W*0.0025;
+      ctx.strokeStyle = "rgb(122,85,48)"; ctx.lineCap = "round";
+      ctx.lineWidth = W*0.013*ts;
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + swayX, ty - th); ctx.stroke();
+      var blx = th*0.52;
+      ctx.lineWidth = W*0.007*ts;
+      ctx.beginPath(); ctx.moveTo(tx+swayX, ty-th); ctx.lineTo(tx+swayX-blx*0.95, ty-th-blx*0.75); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx+swayX, ty-th); ctx.lineTo(tx+swayX+blx*0.95, ty-th-blx*0.85); ctx.stroke();
+      if (leaf > 0 && canopy > 0) {
+        var cr = th*0.62*canopy;
+        ctx.fillStyle = "rgb(78,154,58)";
+        ctx.beginPath(); ctx.arc(tx+swayX, ty-th-th*0.18, cr, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.arc(tx+swayX-cr*0.75, ty-th-th*0.02, cr*0.82, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = "rgb(91,170,64)";
+        ctx.beginPath(); ctx.arc(tx+swayX+cr*0.75, ty-th-th*0.02, cr*0.82, 0, 6.2832); ctx.fill();
+        if (fruit > 0) {
+          for (var k = 0; k < 6; k++) {
+            var a = k*1.7;
+            ctx.fillStyle = k % 2 ? "rgb(242,154,46)" : "rgb(229,72,59)";
+            ctx.beginPath();
+            ctx.arc(tx+swayX+Math.cos(a)*cr*0.75, ty-th-th*0.18+Math.sin(a)*cr*0.62, cr*0.11*fruit, 0, 6.2832);
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    // stream
+    var sA = seg(p, 0.75, 0.90);
+    if (sA > 0) {
+      ctx.strokeStyle = "rgba(93,180,227,.95)"; ctx.lineCap = "round";
+      ctx.lineWidth = W*0.04*sA;
+      ctx.beginPath(); ctx.moveTo(W*1.05, H*0.68);
+      ctx.bezierCurveTo(W*0.95, H*0.74, W*0.85, H*0.79, pondX + prx*0.88, pondY);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(169,223,245,.55)"; ctx.lineWidth = W*0.014*sA; ctx.stroke();
+    }
+
+    // pond
+    ctx.fillStyle = "rgb(115,90,61)";
+    ctx.beginPath(); ctx.ellipse(pondX, pondY, prx, pry, 0, 0, 6.2832); ctx.fill();
+    var water = smooth(seg(p, 0, 0.06));
+    if (water > 0) {
+      var wr = prx*0.94*water, wh = pry*0.94*water;
+      ctx.fillStyle = rgb(mix([77,163,212], [107,184,224], p));
+      ctx.beginPath(); ctx.ellipse(pondX, pondY, wr, wh, 0, 0, 6.2832); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.4)";
+      ctx.beginPath(); ctx.ellipse(pondX - wr*0.3, pondY - wh*0.35, wr*0.5, wh*0.14, 0, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = W*0.0025;
+      var idle = (time*0.5) % 1;
+      ctx.beginPath(); ctx.ellipse(pondX, pondY, wr*idle, wh*idle, 0, 0, 6.2832); ctx.stroke();
+      // tap ripples
+      for (i = drops.length - 1; i >= 0; i--) {
+        var d = drops[i];
+        var rr = 0.2 + 0.8*d.t;
+        ctx.strokeStyle = "rgba(255,255,255," + (0.65*(1-d.t)) + ")";
+        ctx.lineWidth = W*0.005;
+        ctx.beginPath(); ctx.ellipse(pondX, pondY, wr*rr, wh*rr, 0, 0, 6.2832); ctx.stroke();
+        if (d.t < 0.3) {
+          ctx.fillStyle = "rgba(154,211,240,.95)";
+          ctx.beginPath(); ctx.ellipse(pondX, pondY - H*0.16*(1-d.t/0.3), W*0.006, W*0.010, 0, 0, 6.2832); ctx.fill();
+        }
+      }
+    }
+    ctx.strokeStyle = "rgb(138,94,52)"; ctx.lineWidth = W*0.008;
+    ctx.beginPath(); ctx.ellipse(pondX, pondY, prx, pry, 0, 0, 6.2832); ctx.stroke();
+
+    // ducklings
+    var dA = seg(p, 0.65, 0.75);
+    if (dA > 0) {
+      for (var dd = 0; dd < 2; dd++) {
+        var dx = pondX - prx*0.28 + dd*prx*0.22 + Math.sin(time*6.2832 + dd)*prx*0.14;
+        var dy = pondY + pry*0.15 + dd*pry*0.1 + Math.sin(time*6.2832*3 + dd)*pry*0.06;
+        var ds = W*0.022*dA*(1 - dd*0.15);
+        ctx.fillStyle = "rgb(253,251,244)";
+        ctx.beginPath(); ctx.ellipse(dx, dy, ds, ds*0.55, 0, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.arc(dx+ds*0.85, dy-ds*0.75, ds*0.48, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = "rgb(255,164,59)";
+        ctx.beginPath(); ctx.ellipse(dx+ds*1.18, dy-ds*0.75, ds*0.28, ds*0.12, 0, 0, 6.2832); ctx.fill();
+      }
+    }
+
+    // rabbits
+    var rA = seg(p, 0.70, 0.80);
+    if (rA > 0) {
+      for (var rr2 = 0; rr2 < 2; rr2++) {
+        var rxp = W*(0.14 + rr2*0.66), ryp = H*0.90, rs = W*0.03*rA;
+        ctx.fillStyle = "rgb(247,238,221)";
+        ctx.beginPath(); ctx.ellipse(rxp, ryp-rs, rs*0.8, rs*0.6, 0, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.arc(rxp+rs*0.45, ryp-rs*1.05, rs*0.42, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(rxp+rs*0.4, ryp-rs*1.6, rs*0.13, rs*0.4, -0.2, 0, 6.2832); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(rxp+rs*0.62, ryp-rs*1.6, rs*0.12, rs*0.38, 0.15, 0, 6.2832); ctx.fill();
+      }
+    }
+
+    // fawn
+    var fA = seg(p, 0.85, 0.92);
+    if (fA > 0) {
+      var fx = pondX - prx - W*0.06, fy = pondY - pry + H*0.01, fs = W*0.05*fA;
+      ctx.fillStyle = "rgb(217,176,122)";
+      ctx.beginPath(); ctx.ellipse(fx, fy-fs*1.2, fs*0.62, fs*0.4, 0, 0, 6.2832); ctx.fill();
+      ctx.strokeStyle = "rgb(217,176,122)"; ctx.lineWidth = W*0.006;
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx-fs*0.2, fy-fs*0.9); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(fx+fs*0.35, fy); ctx.lineTo(fx+fs*0.4, fy-fs*0.9); ctx.stroke();
+      ctx.beginPath(); ctx.arc(fx+fs*0.55, fy-fs*1.55, fs*0.2, 0, 6.2832); ctx.fill();
+    }
+
+    // birds
+    var birdA = seg(p, 0.70, 0.80);
+    if (birdA > 0) {
+      ctx.strokeStyle = "rgba(74,56,34," + (0.65*birdA) + ")"; ctx.lineWidth = W*0.0028; ctx.lineCap = "round";
+      for (var bb = 0; bb < 3; bb++) {
+        var bx = ((time*0.9 + bb*0.3) % 1) * W*1.2 - W*0.1;
+        var by = H*0.28 + bb*H*0.025 + Math.sin((time*4 + bb)*6.2832)*H*0.004;
+        var s2 = W*0.014;
+        ctx.beginPath(); ctx.moveTo(bx-s2, by-s2*0.5); ctx.lineTo(bx, by); ctx.lineTo(bx+s2, by-s2*0.5); ctx.stroke();
+      }
+    }
+
+    // petals after 100
+    var petalA = seg(p, 0.985, 1);
+    if (petalA > 0) {
+      for (var pp = 0; pp < 14; pp++) {
+        var u = (time*0.35 + pp*0.07) % 1;
+        ctx.fillStyle = "rgba(255,198,218," + (0.8*(1-u)*petalA) + ")";
+        ctx.beginPath();
+        ctx.ellipse(W*((pp*0.083)%1) + Math.sin((time+pp)*6.2832)*W*0.02, H*0.85 - u*H*0.35, W*0.006, W*0.003, u*3, 0, 6.2832);
+        ctx.fill();
+      }
+    }
+
+    // tap drops age
+    for (i = drops.length - 1; i >= 0; i--) { drops[i].t += dt / 0.9; if (drops[i].t >= 1) drops.splice(i, 1); }
+  }
+
+  function loop(ts) {
+    if (paused) { running = false; return; }
+    if (!running) { running = true; last = 0; }
+    if (!last) last = ts;
+    var dt = Math.min(0.05, (ts - last) / 1000); last = ts;
+    time += dt;
+    progress += (target - progress) * Math.min(1, dt / 0.65);
+    draw(dt);
+    requestAnimationFrame(loop);
+  }
+
+  window.zikrScene = {
+    init: function (p) {
+      progress = target = Math.max(0, Math.min(1, p || 0));
+      draw(0);
+      if (window.ZikrHost) {
+        try {
+          window.ZikrHost.setTextTheme("light");
+          window.ZikrHost.ready();
+        } catch (e) {}
+      }
+      if (!paused) requestAnimationFrame(loop);
+    },
+    setProgress: function (p) {
+      target = Math.max(0, Math.min(1, p || 0));
+    },
+    tap: function (nx, ny) {
+      drops.push({ t: 0 });
+    },
+    setPaused: function (v) {
+      paused = !!v;
+      if (!paused) requestAnimationFrame(loop);
+    }
+  };
+
+  // debug UI when opened in a normal browser
+  if (!hasHost) {
+    var dbg = document.getElementById("dbg");
+    dbg.style.display = "block";
+    var slider = document.getElementById("slider");
+    slider.addEventListener("input", function () { target = slider.value / 100; });
+    document.body.addEventListener("click", function (e) {
+      window.zikrScene.tap(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+    });
+  }
+
+  resize();
+  draw(0);
+  requestAnimationFrame(loop);
+  if (window.ZikrHost) {
+    try {
+      window.ZikrHost.setTextTheme("light");
+      window.ZikrHost.ready();
+    } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>
