@@ -15,247 +15,344 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 private val nightRnd = Random(59)
-private val nightStars = List(110) {
-    Triple(nightRnd.nextFloat(), nightRnd.nextFloat() * 0.62f, nightRnd.nextFloat())
+private val nightStars = List(190) {
+    Triple(nightRnd.nextFloat(), nightRnd.nextFloat() * 0.70f, nightRnd.nextFloat())
+}
+private val brightStars = List(9) {
+    Pair(nightRnd.nextFloat(), 0.03f + nightRnd.nextFloat() * 0.44f)
+}
+private val snowSparkles = List(26) {
+    Triple(nightRnd.nextFloat(), 0.80f + nightRnd.nextFloat() * 0.18f, nightRnd.nextFloat())
 }
 private val nebulaBlobs = List(5) {
-    Triple(nightRnd.nextFloat(), 0.10f + nightRnd.nextFloat() * 0.35f, nightRnd.nextFloat())
+    Triple(nightRnd.nextFloat(), 0.10f + nightRnd.nextFloat() * 0.30f, nightRnd.nextFloat())
 }
 private val nightPath = Path()
+
+/** A small, distant snowy pine. Quiet enough to leave the sky in charge. */
+private fun DrawScope.snowPine(x: Float, baseY: Float, height: Float, w: Float, alpha: Float) {
+    val trunk = Color(0xFF0B1119).copy(alpha = alpha)
+    drawLine(trunk, Offset(x, baseY), Offset(x, baseY - height), w * 0.006f, StrokeCap.Round)
+    repeat(3) { tier ->
+        val ty = baseY - height * (0.34f + tier * 0.21f)
+        val half = height * (0.34f - tier * 0.08f)
+        val top = ty - height * 0.33f
+        nightPath.reset()
+        nightPath.moveTo(x, top)
+        nightPath.lineTo(x - half, ty)
+        nightPath.lineTo(x + half, ty)
+        nightPath.close()
+        drawPath(nightPath, Color(0xFF13202B).copy(alpha = alpha))
+        nightPath.reset()
+        nightPath.moveTo(x, top + height * 0.03f)
+        nightPath.lineTo(x - half * 0.55f, ty - height * 0.010f)
+        nightPath.lineTo(x - half * 0.20f, ty - height * 0.004f)
+        nightPath.lineTo(x + half * 0.18f, ty - height * 0.012f)
+        nightPath.lineTo(x + half * 0.50f, ty - height * 0.002f)
+        nightPath.close()
+        drawPath(nightPath, Color(0xFFC6D8E9).copy(alpha = 0.38f * alpha))
+    }
+}
 
 object NightScene : Scene {
     override val id = "night"
     override val palette = ScenePalette(Color(0xFFC9B8FF), Color(0xFF8FA6E8))
-    override val tapAnchor = Offset(0.5f, 0.62f)
-    override val labels = listOf("Dusk", "Stars", "Moon", "Cosmos")
+    override val tapAnchor = Offset(0.5f, 0.84f)
+    override val labels = listOf("Dusk", "Stars", "Snow", "Stillness")
 
     override fun textColor(progress: Float): Color = Color(0xFFF3EFE2)
 
     override fun DrawScope.draw(frame: SceneFrame) {
         val p = frame.progress
         val t = frame.time
+        val e = frame.elapsed
         val w = size.width
         val h = size.height
-        val horizon = h * 0.64f
-        val starA = seg(p, 0.05f, 0.40f)
-        val moonA = seg(p, 0.05f, 0.30f)
-        val milky = seg(p, 0.30f, 0.60f)
-        val bloom = seg(p, 0.80f, 1f)
+        val horizon = h * 0.76f
+        val starA = seg(p, 0.04f, 0.34f)
+        val moonA = seg(p, 0.04f, 0.26f)
+        val snowA = seg(p, 0.20f, 0.55f)
+        val milky = seg(p, 0.22f, 0.58f)
+        val auroraA = seg(p, 0.74f, 0.98f) * (0.55f + 0.45f * sin(t * TWO_PI))
 
-        // ----- sky -----
+        // ----- the sky gets most of the frame -----
         drawRect(
             Brush.verticalGradient(
                 listOf(
-                    Color(0xFF070B18),
-                    lerp(Color(0xFF0D1526), Color(0xFF1B2A4A), milky),
-                    Color(0xFF22304A)
+                    Color(0xFF04070F),
+                    Color(0xFF0A1220),
+                    lerp(Color(0xFF182844), Color(0xFF22364F), snowA * 0.5f),
+                    Color(0xFF2E4258)
                 ),
-                0f, horizon
+                0f, horizon + 2f
             ),
             size = Size(w, horizon + 2f)
         )
 
-        // ----- Milky Way band -----
+        // ----- Milky Way, a wide soft river of light -----
         if (milky > 0f) {
-            rotate(degrees = -24f, pivot = Offset(w * 0.5f, h * 0.3f)) {
+            rotate(degrees = -26f, pivot = Offset(w * 0.5f, h * 0.32f)) {
                 drawRect(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color(0xFFA9C4FF).copy(alpha = 0.10f * milky), Color.Transparent),
-                        startY = h * 0.05f, endY = h * 0.55f
+                        listOf(
+                            Color.Transparent,
+                            Color(0xFF9FB6FF).copy(alpha = 0.06f * milky),
+                            Color(0xFFC9D6FF).copy(alpha = 0.16f * milky),
+                            Color(0xFF9FB6FF).copy(alpha = 0.06f * milky),
+                            Color.Transparent
+                        ),
+                        startY = h * 0.02f, endY = h * 0.64f
                     ),
-                    topLeft = Offset(0f, h * 0.05f), size = Size(w, h * 0.50f)
+                    topLeft = Offset(0f, h * 0.02f), size = Size(w, h * 0.62f)
+                )
+                // dense dust along the band
+                repeat(90) { i ->
+                    val x = ((i * 0.137f + 0.02f) % 1f) * w * 1.3f - w * 0.15f
+                    val y = h * 0.10f + ((i * 0.071f) % 0.36f) * h +
+                        sin((t + i * 0.3f) * TWO_PI) * h * 0.0018f
+                    val bright = 0.25f + 0.45f * (0.5f + 0.5f * sin((t * 0.7f + i) * TWO_PI))
+                    drawCircle(
+                        Color(0xFFDDE8FF).copy(alpha = (0.20f + 0.45f * (i % 5) / 4f) * bright * milky),
+                        w * (0.0007f + 0.0011f * (i % 5) / 4f),
+                        Offset(x, y)
+                    )
+                }
+            }
+            nebulaBlobs.forEachIndexed { i, (x, y, ph) ->
+                val col = listOf(Color(0xFF7B87FF), Color(0xFF9E74FF), Color(0xFF5AD6C6))[i % 3]
+                softGlow(
+                    col, Offset(x * w, y * h), w * 0.30f,
+                    (0.045f + 0.02f * sin((t + ph) * TWO_PI)) * milky
                 )
             }
-            repeat(40) { i ->
-                val x = (i * 0.137f + 0.03f) % 1f * w
-                val y = (h * 0.16f + (i * 0.071f % 0.34f) * h) + sin((t + i) * TWO_PI) * h * 0.002f
-                drawCircle(Color(0xFFDCE7FF).copy(alpha = 0.35f * milky), w * 0.0012f, Offset(x, y))
+        }
+
+        // ----- faint aurora, only as the dhikr nears completion -----
+        if (auroraA > 0.01f) {
+            repeat(2) { i ->
+                val col = listOf(Color(0xFF6FE3B4), Color(0xFF8BB8E8))[i]
+                val yBase = h * (0.10f + i * 0.055f)
+                nightPath.reset()
+                nightPath.moveTo(0f, yBase)
+                var x = 0f
+                while (x <= w) {
+                    nightPath.lineTo(x, yBase + sin((x / w * 1.6f + t * 1.4f + i) * TWO_PI) * h * 0.022f)
+                    x += w / 16f
+                }
+                drawPath(nightPath, col.copy(alpha = 0.07f * auroraA), style = Stroke(w * 0.055f, cap = StrokeCap.Round))
+                drawPath(nightPath, col.copy(alpha = 0.06f * auroraA), style = Stroke(w * 0.024f, cap = StrokeCap.Round))
             }
         }
 
-        // ----- nebula colours near completion -----
-        if (bloom > 0f) nebulaBlobs.forEachIndexed { i, (x, y, ph) ->
-            val col = listOf(Color(0xFF6E7BFF), Color(0xFF9A6EFF), Color(0xFF4FD3C4))[i % 3]
-            softGlow(col, Offset(x * w, y * h), w * 0.28f, (0.10f + 0.03f * sin((t + ph) * TWO_PI)) * bloom)
-        }
-
-        // ----- stars appearing one by one -----
+        // ----- stars: many, gently twinkling -----
         if (starA > 0f) nightStars.forEachIndexed { i, (sx, sy, ph) ->
-            val appear = ((starA * 1.35f) - i.toFloat() / nightStars.size).coerceIn(0f, 1f)
+            val appear = ((starA * 1.4f) - i.toFloat() / nightStars.size).coerceIn(0f, 1f)
             if (appear > 0f) {
-                val tw = 0.45f + 0.55f * (0.5f + 0.5f * sin((t * (0.6f + ph) + ph * 2f) * TWO_PI))
-                twinkleStar(sx * w, sy * h, w * (0.0012f + 0.0016f * ph), tw * appear)
+                val tw = 0.30f + 0.70f * (0.5f + 0.5f * sin((t * (0.4f + ph * 0.8f) + ph * 2f) * TWO_PI))
+                val r = w * (0.0007f + 0.0013f * ph)
+                drawCircle(Color(0xFFF2F6FF).copy(alpha = appear * (0.30f + 0.70f * tw)), r, Offset(sx * w, sy * h))
+            }
+        }
+        // a handful of bright stars with soft four-point flares
+        brightStars.forEachIndexed { i, (sx, sy) ->
+            val a = seg(p, 0.06f + i * 0.02f, 0.30f + i * 0.02f)
+            if (a > 0f) {
+                val tw = 0.55f + 0.45f * sin((t * 1.1f + i * 0.37f) * TWO_PI)
+                val r = w * 0.0022f
+                softGlow(Color(0xFFEAF1FF), Offset(sx * w, sy * h), r * 7f, 0.12f * a * tw)
+                drawCircle(Color(0xFFFBFDFF).copy(alpha = a * tw), r, Offset(sx * w, sy * h))
+                drawLine(
+                    Color(0xFFDCE8FF).copy(alpha = a * tw * 0.5f),
+                    Offset(sx * w - r * 5f, sy * h), Offset(sx * w + r * 5f, sy * h), r * 0.30f
+                )
+                drawLine(
+                    Color(0xFFDCE8FF).copy(alpha = a * tw * 0.5f),
+                    Offset(sx * w, sy * h - r * 5f), Offset(sx * w, sy * h + r * 5f), r * 0.30f
+                )
             }
         }
 
-        // ----- crescent moon with halo -----
+        // ----- a full moon, high in the sky -----
         if (moonA > 0f) {
             val mx = lerpF(w * 0.80f, w * 0.76f, moonA)
-            val my = lerpF(h * 0.56f, h * 0.18f, smooth(moonA))
-            val mr = w * 0.055f
-            softGlow(Color(0xFFE8E4FF), Offset(mx, my), mr * 3.4f, 0.20f * moonA)
-            drawCircle(Color(0xFFF6F2E2).copy(alpha = moonA), mr, Offset(mx, my))
-            drawCircle(Color(0xFF16203A).copy(alpha = moonA), mr * 0.92f, Offset(mx + mr * 0.45f, my - mr * 0.20f))
-            // thin drifting cloud across the moon
-            val cloudX = ((t * 0.6f + 0.2f) % 1f) * w * 1.2f - w * 0.1f
+            val my = lerpF(h * 0.62f, h * 0.17f, smooth(moonA))
+            val mr = w * 0.075f
+            softGlow(Color(0xFFCFDDFF), Offset(mx, my), mr * 5.2f, 0.13f * moonA)
+            softGlow(Color(0xFFE8EDFF), Offset(mx, my), mr * 2.4f, 0.18f * moonA)
+            drawCircle(Color(0xFFFBF6E4).copy(alpha = moonA), mr, Offset(mx, my))
+            drawCircle(Color(0xFFF2EDD8).copy(alpha = 0.55f * moonA), mr * 0.94f, Offset(mx, my))
+            // soft maria
+            drawCircle(Color(0xFFD9D3BE).copy(alpha = 0.20f * moonA), mr * 0.22f, Offset(mx - mr * 0.30f, my - mr * 0.16f))
+            drawCircle(Color(0xFFD9D3BE).copy(alpha = 0.16f * moonA), mr * 0.14f, Offset(mx + mr * 0.22f, my + mr * 0.24f))
+            drawCircle(Color(0xFFD9D3BE).copy(alpha = 0.14f * moonA), mr * 0.10f, Offset(mx + mr * 0.34f, my - mr * 0.30f))
+            drawCircle(Color(0xFFD9D3BE).copy(alpha = 0.12f * moonA), mr * 0.08f, Offset(mx - mr * 0.10f, my + mr * 0.40f))
+            // thin drifting cloud over the moon
+            val cloudX = ((e * 0.008f + 0.12f) % 1f) * w * 1.3f - w * 0.15f
+            val cloudY = my + mr * 1.25f
             drawOval(
-                Color(0xFF2C3A56).copy(alpha = 0.35f * moonA),
-                Offset(cloudX, my + mr * 0.2f), Size(w * 0.20f, h * 0.014f)
+                Color(0xFF39495F).copy(alpha = 0.26f * moonA),
+                Offset(cloudX, cloudY), Size(w * 0.26f, h * 0.012f)
+            )
+            drawOval(
+                Color(0xFF455669).copy(alpha = 0.16f * moonA),
+                Offset(cloudX + w * 0.05f, cloudY + h * 0.008f), Size(w * 0.18f, h * 0.009f)
             )
         }
 
-        // ----- dunes -----
-        val duneFar = Color(0xFF121A2A)
-        val duneMid = Color(0xFF0D1420)
-        val duneNear = Color(0xFF090F18)
-        drawPath(hillPath(nightPath, w, horizon + h * 0.01f, h * 0.05f, 0f), duneFar)
-        drawPath(hillPath(nightPath, w, horizon + h * 0.08f, h * 0.06f, w * 0.25f), duneMid)
-        drawPath(hillPath(nightPath, w, h * 0.92f, h * 0.05f, w * 0.1f), duneNear)
-        // moonlit rims on the ridges
-        if (moonA > 0f) {
-            drawLine(Color(0xFF9FB0D0).copy(alpha = 0.35f * moonA), Offset(0f, horizon), Offset(w * 0.55f, horizon - h * 0.012f), w * 0.0025f)
-            drawLine(Color(0xFFB9C6E0).copy(alpha = 0.25f * moonA), Offset(w * 0.25f, h * 0.855f), Offset(w, h * 0.86f), w * 0.0022f)
-        }
-
-        // ----- lone tree on the far dune -----
-        val treeX = w * 0.18f
-        val treeY = horizon + h * 0.015f
-        drawLine(Color(0xFF0A0E16), Offset(treeX, treeY), Offset(treeX + w * 0.006f, treeY - h * 0.075f), w * 0.008f, StrokeCap.Round)
-        drawLine(Color(0xFF0A0E16), Offset(treeX, treeY - h * 0.045f), Offset(treeX - w * 0.030f, treeY - h * 0.075f), w * 0.004f, StrokeCap.Round)
-        drawLine(Color(0xFF0A0E16), Offset(treeX, treeY - h * 0.055f), Offset(treeX + w * 0.028f, treeY - h * 0.085f), w * 0.004f, StrokeCap.Round)
-
-        // ----- campfire and tent -----
-        val fireA = seg(p, 0.30f, 0.60f)
-        val campX = w * 0.20f
-        val campY = h * 0.90f
-        // tent
-        nightPath.reset()
-        nightPath.moveTo(campX + w * 0.10f, campY)
-        nightPath.lineTo(campX + w * 0.16f, campY - h * 0.065f)
-        nightPath.lineTo(campX + w * 0.22f, campY)
-        nightPath.close()
-        drawPath(nightPath, Color(0xFF2A2A38))
-        if (fireA > 0f) {
-            val flick = 0.7f + 0.3f * sin((t * 6f) * TWO_PI)
-            softGlow(Color(0xFFFFB35C), Offset(campX, campY - h * 0.012f), w * 0.16f, 0.35f * fireA * flick)
-            nightPath.reset()
-            nightPath.moveTo(campX - w * 0.012f, campY)
-            nightPath.lineTo(campX, campY - h * 0.028f * flick)
-            nightPath.lineTo(campX + w * 0.012f, campY)
-            nightPath.close()
-            drawPath(nightPath, Color(0xFFFFC46B).copy(alpha = fireA))
-            drawLine(Color(0xFF3A2A1E), Offset(campX - w * 0.018f, campY), Offset(campX + w * 0.018f, campY), w * 0.006f, StrokeCap.Round)
-            repeat(4) { i ->
-                val u = (t * 0.8f + i * 0.25f) % 1f
-                drawCircle(
-                    Color(0xFFFFD08A).copy(alpha = 0.6f * (1f - u) * fireA),
-                    w * 0.0018f,
-                    Offset(campX + sin((t + u) * TWO_PI) * w * 0.02f, campY - h * 0.02f - u * h * 0.08f)
-                )
-            }
-            // lantern by the tent
-            softGlow(Color(0xFFFFD37A), Offset(campX + w * 0.10f, campY - h * 0.045f), w * 0.05f, 0.35f * fireA)
-            drawRect(Color(0xFFFFD37A).copy(alpha = fireA), Offset(campX + w * 0.098f, campY - h * 0.048f), Size(w * 0.006f, h * 0.008f))
-        }
-
-        // ----- camel caravan -----
-        val camelA = seg(p, 0.50f, 0.68f)
-        if (camelA > 0f) {
-            val walk = (t * 0.25f) % 1f
-            camel(w * (0.30f + walk * 0.35f), h * 0.845f, w * 0.045f * camelA, w, t)
-            camel(w * (0.18f + walk * 0.35f), h * 0.865f, w * 0.036f * camelA, w, t + 0.15f)
-        }
-
-        // ----- fennec on a dune -----
-        val fennecA = seg(p, 0.60f, 0.78f)
-        if (fennecA > 0f) {
-            val fx = w * 0.82f
-            val fy = h * 0.885f
-            drawOval(Color(0xFFC9A98A).copy(alpha = fennecA), Offset(fx - w * 0.018f, fy - w * 0.014f), Size(w * 0.036f, w * 0.018f))
-            drawCircle(Color(0xFFC9A98A).copy(alpha = fennecA), w * 0.010f, Offset(fx + w * 0.016f, fy - w * 0.018f))
-            drawOval(Color(0xFFD9BC9E).copy(alpha = fennecA), Offset(fx + w * 0.008f, fy - w * 0.040f), Size(w * 0.008f, w * 0.020f))
-            drawOval(Color(0xFFD9BC9E).copy(alpha = fennecA), Offset(fx + w * 0.020f, fy - w * 0.040f), Size(w * 0.008f, w * 0.020f))
-            drawCircle(Color(0xFF1A1A22), w * 0.0022f, Offset(fx + w * 0.020f, fy - w * 0.018f))
-        }
-
-        // ----- oasis and star reflections -----
-        val oasisA = seg(p, 0.80f, 1f)
-        if (oasisA > 0f) {
-            val ox = w * 0.58f
-            val oy = h * 0.94f
-            drawOval(Color(0xFF122339).copy(alpha = 0.9f * oasisA), Offset(ox - w * 0.16f, oy - w * 0.045f), Size(w * 0.32f, w * 0.09f))
-            drawOval(
-                Color(0xFF6E9BCB).copy(alpha = 0.30f * oasisA),
-                Offset(ox - w * 0.10f, oy - w * 0.030f), Size(w * 0.20f, w * 0.03f)
-            )
-            repeat(6) { i ->
-                val sx = ox + (i - 2.5f) * w * 0.035f
-                val tw = 0.4f + 0.6f * (0.5f + 0.5f * sin((t * 2f + i) * TWO_PI))
-                drawCircle(Color(0xFFE8F0FF).copy(alpha = 0.5f * tw * oasisA), w * 0.0018f, Offset(sx, oy - w * 0.018f))
-            }
-        }
-
-        // ----- shooting stars -----
-        repeat(2) { i ->
-            val cycle = (t * 0.55f + i * 0.47f) % 1f
-            if (cycle < 0.055f) {
-                val u = cycle / 0.055f
-                val sx = w * (0.20f + i * 0.35f) + u * w * 0.22f
-                val sy = h * (0.10f + i * 0.09f) + u * h * 0.10f
+        // ----- shooting stars, driven by the monotonic clock so they feel random -----
+        repeat(4) { i ->
+            val span = 0.75f + i * 0.18f
+            val raw = (e * 0.055f / span + i * 0.41f) % 1f
+            val streak = 0.07f
+            if (raw < streak) {
+                val u = raw / streak
+                val startX = w * (0.06f + (i * 0.23f) % 0.72f)
+                val startY = h * (0.06f + (i * 0.11f) % 0.34f)
+                val travel = smooth(u)
+                val head = Offset(startX + travel * w * 0.24f, startY + travel * h * 0.12f)
+                val a = 0.9f * (1f - u) * (1f - u)
                 drawLine(
-                    Color(0xFFEAF1FF).copy(alpha = 0.85f * (1f - u)),
-                    Offset(sx, sy), Offset(sx - w * 0.09f, sy - h * 0.035f), w * 0.0025f, StrokeCap.Round
+                    Color(0xFFEFF4FF).copy(alpha = a),
+                    head, Offset(head.x - w * 0.14f, head.y - h * 0.060f),
+                    w * 0.0030f, StrokeCap.Round
                 )
+                drawLine(
+                    Color(0xFFDCE7FF).copy(alpha = a * 0.45f),
+                    head, Offset(head.x - w * 0.06f, head.y - h * 0.026f),
+                    w * 0.0075f, StrokeCap.Round
+                )
+                softGlow(Color(0xFFEAF2FF), head, w * 0.05f, 0.20f * a)
             }
         }
 
-        // ----- tap: a star drops and lands with a soft ring -----
+        // ----- a low, distant mountain line -----
+        val far = lerp(Color(0xFF223348), Color(0xFF344A62), snowA)
+        nightPath.reset()
+        nightPath.moveTo(0f, horizon)
+        nightPath.lineTo(w * 0.12f, h * 0.665f)
+        nightPath.lineTo(w * 0.24f, h * 0.705f)
+        nightPath.lineTo(w * 0.38f, h * 0.655f)
+        nightPath.lineTo(w * 0.52f, h * 0.700f)
+        nightPath.lineTo(w * 0.66f, h * 0.650f)
+        nightPath.lineTo(w * 0.82f, h * 0.702f)
+        nightPath.lineTo(w, h * 0.668f)
+        nightPath.lineTo(w, horizon)
+        nightPath.lineTo(0f, horizon)
+        nightPath.close()
+        drawPath(nightPath, far)
+
+        val mid = lerp(Color(0xFF1B2B3F), Color(0xFF2B3F57), snowA)
+        nightPath.reset()
+        nightPath.moveTo(0f, horizon)
+        nightPath.lineTo(w * 0.20f, h * 0.715f)
+        nightPath.lineTo(w * 0.36f, h * 0.700f)
+        nightPath.lineTo(w * 0.56f, h * 0.725f)
+        nightPath.lineTo(w * 0.74f, h * 0.702f)
+        nightPath.lineTo(w * 0.90f, h * 0.722f)
+        nightPath.lineTo(w, h * 0.705f)
+        nightPath.lineTo(w, horizon)
+        nightPath.close()
+        drawPath(nightPath, mid)
+
+        // moonlit ridgelines
+        if (moonA > 0f) {
+            drawLine(
+                Color(0xFFA9C0D8).copy(alpha = 0.18f * moonA),
+                Offset(0f, h * 0.668f), Offset(w * 0.38f, h * 0.657f),
+                w * 0.0018f, StrokeCap.Round
+            )
+            drawLine(
+                Color(0xFF9FB6CE).copy(alpha = 0.12f * moonA),
+                Offset(w * 0.62f, h * 0.703f), Offset(w, h * 0.669f),
+                w * 0.0016f, StrokeCap.Round
+            )
+        }
+
+        // ----- wide snowfield below -----
+        drawRect(
+            Brush.verticalGradient(
+                listOf(
+                    lerp(Color(0xFF283D54), Color(0xFF324B63), snowA),
+                    Color(0xFF17283A),
+                    Color(0xFF0E1A28)
+                ),
+                startY = h * 0.745f, endY = h
+            ),
+            topLeft = Offset(0f, h * 0.745f), size = Size(w, h * 0.255f)
+        )
+        // one soft crest sweeping across the snow
+        nightPath.reset()
+        nightPath.moveTo(0f, h * 0.82f)
+        var x = 0f
+        while (x <= w) {
+            nightPath.lineTo(x, h * 0.82f + sin((x / w * 1.4f + 0.4f) * TWO_PI) * h * 0.010f)
+            x += w / 18f
+        }
+        nightPath.lineTo(w, h)
+        nightPath.lineTo(0f, h)
+        nightPath.close()
+        drawPath(nightPath, lerp(Color(0xFF20344A), Color(0xFF2C465F), snowA))
+        drawLine(
+            Color(0xFFD6E6F6).copy(alpha = 0.30f * snowA),
+            Offset(0f, h * 0.816f), Offset(w, h * 0.812f),
+            w * 0.0022f, StrokeCap.Round
+        )
+        // faint moonlit path on the snow
+        softGlow(Color(0xFFBBD2EA), Offset(w * 0.74f, h * 0.92f), w * 0.42f, 0.08f * moonA)
+        if (snowA > 0.01f) snowSparkles.forEach { (sx, sy, ph) ->
+            val tw = 0.30f + 0.70f * (0.5f + 0.5f * sin((t * 2.2f + ph * 3f) * TWO_PI))
+            drawCircle(
+                Color(0xFFE6F1FF).copy(alpha = snowA * tw * 0.45f),
+                w * 0.0011f, Offset(sx * w, sy * h)
+            )
+        }
+
+        // ----- just a few small pines at the edges -----
+        val treeA = seg(p, 0.14f, 0.40f)
+        if (treeA > 0f) {
+            snowPine(w * 0.07f, h * 0.935f, h * 0.145f, w, treeA)
+            snowPine(w * 0.155f, h * 0.955f, h * 0.095f, w, treeA * 0.9f)
+            snowPine(w * 0.95f, h * 0.93f, h * 0.125f, w, treeA * 0.95f)
+        }
+
+        // ----- tap: a ripple of starlight on the snow -----
         if (frame.pulse < 1f) {
             val u = frame.pulse
-            val lx = w * 0.5f
-            val ly = h * 0.62f
-            drawLine(
-                Color(0xFFFFF3C8).copy(alpha = 0.8f * (1f - u)),
-                Offset(lx + w * 0.04f * (1f - u), ly - h * 0.04f * (1f - u)),
-                Offset(lx, ly), w * 0.003f, StrokeCap.Round
-            )
+            val cx = w * 0.5f
+            val cy = h * 0.86f
+            softGlow(Color(0xFFDCE9FF), Offset(cx, cy), w * 0.16f * u, 0.20f * (1f - u))
             drawOval(
-                Color(0xFFFFEDB8).copy(alpha = 0.45f * (1f - u)),
-                Offset(lx - w * 0.09f * u, ly - w * 0.03f * u), Size(w * 0.18f * u, w * 0.06f * u),
-                style = Stroke(w * 0.0025f * frame.ripple)
+                Color(0xFFE8F1FF).copy(alpha = 0.42f * (1f - u)),
+                Offset(cx - w * 0.10f * u, cy - w * 0.035f * u),
+                Size(w * 0.20f * u, w * 0.07f * u),
+                style = Stroke(w * 0.0024f * frame.ripple)
             )
-            softGlow(Color(0xFFFFE7A8), Offset(lx, ly), w * 0.10f * u, 0.35f * (1f - u))
-        }
-
-        // ----- completion: a shower of meteors -----
-        if (frame.celebrate > 0f) repeat(12) { i ->
-            val u = (frame.celebrate * 1.1f + i * 0.06f) % 1.15f
-            if (u < 1f) {
-                val sx = w * (0.05f + (i * 0.083f) % 0.9f) + u * w * 0.18f
-                val sy = h * (0.04f + (i * 0.061f) % 0.35f) + u * h * 0.16f
-                drawLine(
-                    Color(0xFFFFF6D8).copy(alpha = 0.9f * (1f - u)),
-                    Offset(sx, sy), Offset(sx - w * 0.10f, sy - h * 0.04f), w * 0.003f, StrokeCap.Round
+            repeat(5) { i ->
+                val a = i * 1.256f
+                drawCircle(
+                    Color(0xFFFFF4D0).copy(alpha = 0.65f * (1f - u)),
+                    w * 0.0022f,
+                    Offset(cx + cos(a) * w * 0.07f * u, cy + sin(a) * h * 0.025f * u)
                 )
             }
         }
+
+        // ----- completion: the sky blooms and meteors fall -----
         if (frame.golden > 0f) {
-            softGlow(Color(0xFFB9A6FF), Offset(w * 0.5f, h * 0.30f), w * 0.9f, 0.10f * frame.golden)
+            softGlow(Color(0xFF9FB6FF), Offset(w * 0.5f, h * 0.28f), w * 1.1f, 0.10f * frame.golden)
+            softGlow(Color(0xFF7FE3C0), Offset(w * 0.2f, h * 0.18f), w * 0.7f, 0.07f * frame.golden)
+        }
+        if (frame.celebrate > 0f) repeat(14) { i ->
+            val u = (frame.celebrate * 1.1f + i * 0.06f) % 1.15f
+            if (u < 1f) {
+                val sx = w * (0.05f + (i * 0.083f) % 0.9f) + u * w * 0.16f
+                val sy = h * (0.04f + (i * 0.061f) % 0.34f) + u * h * 0.14f
+                drawLine(
+                    Color(0xFFFFF6D8).copy(alpha = 0.85f * (1f - u)),
+                    Offset(sx, sy), Offset(sx - w * 0.09f, sy - h * 0.036f),
+                    w * 0.0026f, StrokeCap.Round
+                )
+            }
         }
     }
-}
-
-/* ---------- pieces ---------- */
-private fun DrawScope.camel(x: Float, y: Float, s: Float, w: Float, time: Float) {
-    val body = Color(0xFF171B26)
-    drawOval(body, Offset(x - s, y - s * 0.9f), Size(s * 2f, s * 0.7f))
-    drawCircle(body, s * 0.30f, Offset(x - s * 0.05f, y - s * 1.15f))
-    drawLine(body, Offset(x + s * 0.75f, y - s * 0.85f), Offset(x + s * 0.95f, y - s * 1.5f), s * 0.30f, StrokeCap.Round)
-    drawOval(body, Offset(x + s * 0.85f, y - s * 1.75f), Size(s * 0.55f, s * 0.30f))
-    val step = sin(time * TWO_PI * 2f)
-    drawLine(body, Offset(x - s * 0.45f, y - s * 0.3f), Offset(x - s * 0.55f - step * s * 0.12f, y), s * 0.16f, StrokeCap.Round)
-    drawLine(body, Offset(x + s * 0.35f, y - s * 0.3f), Offset(x + s * 0.45f + step * s * 0.12f, y), s * 0.16f, StrokeCap.Round)
-    drawLine(body, Offset(x - s * 0.9f, y - s * 0.8f), Offset(x - s * 1.1f, y - s * 0.5f), s * 0.08f, StrokeCap.Round)
-    drawCircle(Color(0xFF3A3A48), s * 0.05f, Offset(x + s * 1.10f, y - s * 1.72f))
-    drawLine(body, Offset(x, y - s * 0.85f), Offset(x, y - s * 1.0f), w * 0.003f)
 }

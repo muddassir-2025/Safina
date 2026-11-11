@@ -26,7 +26,10 @@ data class ScenePalette(val accent: Color, val glow: Color)
 /** Everything a scene needs for one frame. A scene never knows about counts or targets. */
 data class SceneFrame(
     val progress: Float,
+    /** 0..1 looping clock, for ambient sway. */
     val time: Float,
+    /** Monotonic seconds since launch, for journeys that must not jump on a loop. */
+    val elapsed: Float = 0f,
     val pulse: Float = 1f,
     val ripple: Float = 1f,
     val shimmer: Float = 0f,

@@ -30,7 +30,7 @@ private val winterStars = List(70) {
     Triple(winterRnd.nextFloat(), winterRnd.nextFloat() * 0.50f, winterRnd.nextFloat())
 }
 private val winterTrees = listOf(
-    0.08f to 1.00f, 0.22f to 0.60f, 0.66f to 0.55f, 0.84f to 1.05f, 0.95f to 0.50f
+    0.06f to 0.85f, 0.20f to 1.05f, 0.81f to 1.02f, 0.94f to 0.80f
 )
 private val winterPath = Path()
 private val auroraPath = Path()
@@ -178,7 +178,7 @@ object WinterScene : Scene {
         winterTrees.forEach { (fx, s) ->
             val bx = fx * w
             val by = horizon + h * 0.04f
-            val th = h * 0.10f * s
+            val th = h * 0.125f * s
             val bark = Color(0xFF2F3438)
             drawLine(bark, Offset(bx, by), Offset(bx, by - th), w * 0.010f * s, StrokeCap.Round)
             drawLine(bark, Offset(bx, by - th * 0.60f), Offset(bx - th * 0.30f, by - th * 0.95f), w * 0.005f * s, StrokeCap.Round)
@@ -201,12 +201,15 @@ object WinterScene : Scene {
             }
         }
 
-        // ----- life (snowman, fox, hare, robins, cabin) -----
+        // ----- life around the cabin (snowman, cat, hen) -----
         val lifeA = seg(p, 0.50f, 0.80f)
         if (lifeA > 0f) {
-            snowman(w * 0.24f, h * 0.88f, w * 0.055f * lifeA, w = w)
-            fox(w * 0.79f, h * 0.89f, w * 0.040f * lifeA, wag = 0.5f + 0.5f * sin(t * TWO_PI * 3f), w = w)
-            hare(w * 0.37f, h * 0.94f, w * 0.020f * lifeA)
+            snowman(w * 0.36f, h * 0.905f, w * 0.086f * lifeA, w = w)
+            cat(w * 0.635f, h * 0.905f, w * 0.052f * lifeA, tail = sin(t * TWO_PI * 1.4f), w = w)
+            hen(
+                w * 0.565f, h * 0.945f, w * 0.042f * lifeA,
+                peck = (0.5f + 0.5f * sin(t * TWO_PI * 1.3f)).coerceAtMost(1f), w = w
+            )
         }
 
         // robins on the left tree branches
@@ -217,28 +220,44 @@ object WinterScene : Scene {
             robin(rx - w * 0.03f, ry + h * 0.015f, w * 0.009f * lifeA, w)
         }
 
-        // warm cabin windows in the distance
+        // warm cabin in the centre, framed by the trees
         if (lifeA > 0f) {
-            val cx = w * 0.90f
-            val cy = horizon - h * 0.01f
-            drawRect(Color(0xFF3A3B44), Offset(cx - w * 0.05f, cy - h * 0.035f), Size(w * 0.10f, h * 0.035f))
+            val cx = w * 0.52f
+            val cy = horizon + h * 0.012f
+            val cw = w * 0.19f
+            val ch = h * 0.088f
+            drawRect(Color(0xFF3B3A40), Offset(cx - cw / 2f, cy - ch), Size(cw, ch))
             winterPath.reset()
-            winterPath.moveTo(cx - w * 0.06f, cy - h * 0.035f)
-            winterPath.lineTo(cx, cy - h * 0.065f)
-            winterPath.lineTo(cx + w * 0.06f, cy - h * 0.035f)
+            winterPath.moveTo(cx - cw * 0.62f, cy - ch)
+            winterPath.lineTo(cx, cy - ch - h * 0.062f)
+            winterPath.lineTo(cx + cw * 0.62f, cy - ch)
             winterPath.close()
-            drawPath(winterPath, Color(0xFF2B2C33))
+            drawPath(winterPath, Color(0xFF2C2B31))
+            // snow on the roof
+            winterPath.reset()
+            winterPath.moveTo(cx - cw * 0.60f, cy - ch - h * 0.004f)
+            winterPath.lineTo(cx, cy - ch - h * 0.066f)
+            winterPath.lineTo(cx + cw * 0.60f, cy - ch - h * 0.004f)
+            winterPath.lineTo(cx + cw * 0.52f, cy - ch - h * 0.012f)
+            winterPath.lineTo(cx, cy - ch - h * 0.052f)
+            winterPath.lineTo(cx - cw * 0.52f, cy - ch - h * 0.012f)
+            winterPath.close()
+            drawPath(winterPath, Color(0xFFF7FBFF).copy(alpha = 0.95f))
             val flicker = 0.75f + 0.25f * sin(t * TWO_PI * 4f)
-            softGlow(Color(0xFFFFC46B), Offset(cx, cy - h * 0.012f), w * 0.055f, 0.45f * lifeA * flicker)
-            drawRect(Color(0xFFFFD98A).copy(alpha = lifeA), Offset(cx - w * 0.022f, cy - h * 0.024f), Size(w * 0.016f, h * 0.014f))
-            drawRect(Color(0xFFFFD98A).copy(alpha = lifeA), Offset(cx + w * 0.008f, cy - h * 0.024f), Size(w * 0.016f, h * 0.014f))
-            // curling chimney smoke
+            softGlow(Color(0xFFFFC46B), Offset(cx, cy - ch * 0.45f), cw * 0.62f, 0.55f * lifeA * flicker)
+            // two windows + door
+            drawRect(Color(0xFFFFD98A).copy(alpha = lifeA), Offset(cx - cw * 0.30f, cy - ch * 0.68f), Size(cw * 0.20f, ch * 0.26f))
+            drawRect(Color(0xFFFFD98A).copy(alpha = lifeA), Offset(cx + cw * 0.10f, cy - ch * 0.68f), Size(cw * 0.20f, ch * 0.26f))
+            drawRect(Color(0xFF2A211C).copy(alpha = lifeA), Offset(cx - cw * 0.07f, cy - ch * 0.52f), Size(cw * 0.15f, ch * 0.52f))
+            drawCircle(Color(0xFFFFD98A).copy(alpha = lifeA * 0.9f), cw * 0.012f, Offset(cx + cw * 0.05f, cy - ch * 0.24f))
+            // chimney smoke
+            drawRect(Color(0xFF403A3B), Offset(cx + cw * 0.22f, cy - ch - h * 0.070f), Size(cw * 0.10f, h * 0.048f))
             repeat(3) { i ->
                 val u = (t * 0.35f + i * 0.33f) % 1f
                 drawCircle(
-                    Color.White.copy(alpha = 0.18f * lifeA * (1f - u)),
-                    w * (0.012f + u * 0.02f),
-                    Offset(cx + w * 0.03f + sin((t + u) * TWO_PI) * w * 0.01f, cy - h * 0.075f - u * h * 0.06f)
+                    Color.White.copy(alpha = 0.20f * lifeA * (1f - u)),
+                    w * (0.012f + u * 0.022f),
+                    Offset(cx + cw * 0.28f + sin((t + u) * TWO_PI) * w * 0.012f, cy - ch - h * 0.085f - u * h * 0.07f)
                 )
             }
         }
@@ -272,6 +291,43 @@ private fun DrawScope.snowman(x: Float, y: Float, s: Float, w: Float) {
     drawLine(Color(0xFFFF9A3C), Offset(x, y - s * 1.80f), Offset(x + s * 0.22f, y - s * 1.74f), w * 0.005f, StrokeCap.Round)
     drawLine(Color(0xFFC9463D), Offset(x - s * 0.30f, y - s * 1.52f), Offset(x + s * 0.30f, y - s * 1.52f), w * 0.012f, StrokeCap.Round)
     drawLine(Color(0xFFC9463D), Offset(x + s * 0.26f, y - s * 1.52f), Offset(x + s * 0.34f, y - s * 1.30f), w * 0.010f, StrokeCap.Round)
+}
+
+private fun DrawScope.cat(x: Float, y: Float, s: Float, tail: Float, w: Float) {
+    val fur = Color(0xFF6B6257)
+    val light = Color(0xFF8C8275)
+    drawOval(Color(0xFF3A3325).copy(alpha = 0.10f), Offset(x - s * 0.7f, y - s * 0.12f), Size(s * 1.5f, s * 0.24f))
+    // seated body
+    drawOval(fur, Offset(x - s * 0.45f, y - s * 0.92f), Size(s * 0.90f, s * 0.95f))
+    drawOval(light, Offset(x - s * 0.10f, y - s * 0.80f), Size(s * 0.45f, s * 0.62f))
+    // head
+    drawCircle(fur, s * 0.30f, Offset(x - s * 0.05f, y - s * 1.10f))
+    // ears
+    winterPath.reset()
+    winterPath.moveTo(x - s * 0.28f, y - s * 1.28f)
+    winterPath.lineTo(x - s * 0.18f, y - s * 1.55f)
+    winterPath.lineTo(x - s * 0.02f, y - s * 1.34f)
+    winterPath.close()
+    drawPath(winterPath, fur)
+    winterPath.reset()
+    winterPath.moveTo(x + s * 0.10f, y - s * 1.34f)
+    winterPath.lineTo(x + s * 0.24f, y - s * 1.52f)
+    winterPath.lineTo(x + s * 0.26f, y - s * 1.25f)
+    winterPath.close()
+    drawPath(winterPath, fur)
+    // eyes and nose
+    drawCircle(Color(0xFF2E2A26), s * 0.045f, Offset(x - s * 0.15f, y - s * 1.13f))
+    drawCircle(Color(0xFF2E2A26), s * 0.045f, Offset(x + s * 0.09f, y - s * 1.13f))
+    drawCircle(Color(0xFFC98C86), s * 0.035f, Offset(x - s * 0.03f, y - s * 1.02f))
+    // tail curling beside the body
+    drawLine(
+        fur, Offset(x - s * 0.42f, y - s * 0.18f),
+        Offset(x - s * (0.58f + 0.10f * tail), y - s * 0.58f), w * 0.016f, StrokeCap.Round
+    )
+    drawLine(
+        fur, Offset(x - s * (0.58f + 0.10f * tail), y - s * 0.58f),
+        Offset(x - s * (0.34f + 0.20f * tail), y - s * 0.72f), w * 0.014f, StrokeCap.Round
+    )
 }
 
 private fun DrawScope.fox(x: Float, y: Float, s: Float, wag: Float, w: Float) {

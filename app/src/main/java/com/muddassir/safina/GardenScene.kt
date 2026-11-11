@@ -430,24 +430,24 @@ fun DrawScope.drawGarden(
         val d2x = podX - rx * 0.06f + sin((t - 0.04f) * twoPi) * rx * 0.14f
         val d1y = baseY + sin(t * twoPi * 3f) * ry * 0.06f
         val d2y = baseY + ry * 0.10f + sin((t - 0.04f) * twoPi * 3f) * ry * 0.06f
-        duckling(d1x, d1y, w * 0.022f * dA, dip = maxD(0f, sin(t * twoPi * 2f)), w = w)
-        duckling(d2x, d2y, w * 0.019f * dA, dip = maxD(0f, sin((t + 0.5f) * twoPi * 2f)), w = w)
+        duckling(d1x, d1y, w * 0.026f * dA, dip = maxD(0f, sin(t * twoPi * 2f)), w = w)
+        duckling(d2x, d2y, w * 0.023f * dA, dip = maxD(0f, sin((t + 0.5f) * twoPi * 2f)), w = w)
     }
 
     // ----- rabbits -----
     val rA = seg(p, 0.70f, 0.80f)
     if (rA > 0f) {
         val hopL = (sin(t * twoPi) + 1f) * 0.5f
-        rabbit(w * 0.14f + sin(t * twoPi * 0.5f) * w * 0.012f, h * 0.90f - hopL * h * 0.008f, w * 0.030f * rA, earTwitch = earTwitch(t, 0f), w = w)
-        rabbit(w * 0.80f + sin((t + 0.35f) * twoPi * 0.5f) * w * 0.012f, h * 0.90f - (1f - hopL) * h * 0.006f, w * 0.028f * rA, earTwitch = earTwitch(t, 0.45f), w = w)
-        // two smaller rabbits grazing near the tree line
-        rabbit(
-            w * 0.235f + sin((t + 0.60f) * twoPi * 0.5f) * w * 0.008f, h * 0.615f,
-            w * 0.019f * rA, earTwitch = earTwitch(t, 0.20f), w = w
+        rabbit(w * 0.14f + sin(t * twoPi * 0.5f) * w * 0.012f, h * 0.90f - hopL * h * 0.008f, w * 0.038f * rA, earTwitch = earTwitch(t, 0f), w = w)
+        rabbit(w * 0.80f + sin((t + 0.35f) * twoPi * 0.5f) * w * 0.012f, h * 0.90f - (1f - hopL) * h * 0.006f, w * 0.035f * rA, earTwitch = earTwitch(t, 0.45f), w = w)
+        // two hens pecking near the tree line
+        hen(
+            w * 0.235f + sin((t + 0.60f) * twoPi * 0.5f) * w * 0.008f, h * 0.640f,
+            w * 0.030f * rA, peck = maxD(0f, sin((t * 1.3f + 0.1f) * twoPi)), w = w
         )
-        rabbit(
-            w * 0.695f + sin((t + 0.80f) * twoPi * 0.5f) * w * 0.008f, h * 0.640f,
-            w * 0.020f * rA, earTwitch = earTwitch(t, 0.70f), w = w
+        hen(
+            w * 0.695f + sin((t + 0.80f) * twoPi * 0.5f) * w * 0.008f, h * 0.665f,
+            w * 0.032f * rA, peck = maxD(0f, sin((t * 1.1f + 0.55f) * twoPi)), w = w
         )
     }
 
@@ -457,12 +457,12 @@ fun DrawScope.drawGarden(
         val drink = smooth(maxD(0f, sin((t * 0.9f + 0.2f) * twoPi)))
         fawn(
             podX - rx - w * 0.060f, podY - ry + h * 0.005f,
-            w * 0.056f * fA, drink = drink * 0.6f, w = w
+            w * 0.064f * fA, drink = drink * 0.6f, w = w
         )
         // a second, smaller deer standing by the right-hand trees
         fawn(
-            w * 0.895f, h * 0.665f,
-            w * 0.042f * fA, drink = (1f - drink) * 0.35f, w = w
+            w * 0.895f, h * 0.680f,
+            w * 0.050f * fA, drink = (1f - drink) * 0.35f, w = w
         )
     }
 
@@ -715,6 +715,32 @@ private fun DrawScope.rabbit(x: Float, y: Float, s: Float, earTwitch: Float, w: 
     drawCircle(Color(0xFF3A3226), s * 0.07f, Offset(x + s * 0.62f, y - s * 1.06f))
     drawCircle(Color(0xFFD9A3A3), s * 0.06f, Offset(x + s * 0.78f, y - s * 0.95f))
     drawLine(fur, Offset(x - s * 0.7f, y - s * 0.25f), Offset(x - s * 0.8f, y), w * 0.006f, StrokeCap.Round)
+}
+
+internal fun DrawScope.hen(x: Float, y: Float, s: Float, peck: Float, w: Float) {
+    val body = Color(0xFFF2E4CB)
+    val wing = Color(0xFFDFCBA9)
+    val red = Color(0xFFC9553F)
+    // legs
+    drawLine(Color(0xFFB8863F), Offset(x - s * 0.22f, y), Offset(x - s * 0.22f, y - s * 0.42f), w * 0.0035f, StrokeCap.Round)
+    drawLine(Color(0xFFB8863F), Offset(x + s * 0.24f, y), Offset(x + s * 0.24f, y - s * 0.42f), w * 0.0035f, StrokeCap.Round)
+    // tail feathers
+    drawOval(body, Offset(x - s * 1.05f, y - s * 0.95f), Size(s * 0.85f, s * 0.62f))
+    drawOval(wing, Offset(x - s * 1.15f, y - s * 1.15f), Size(s * 0.55f, s * 0.38f))
+    // body
+    drawOval(body, Offset(x - s * 0.72f, y - s * 1.02f), Size(s * 1.44f, s * 0.82f))
+    drawOval(wing, Offset(x - s * 0.30f, y - s * 0.90f), Size(s * 0.62f, s * 0.42f))
+    // head, dips to peck
+    val hx = x + s * 0.62f + peck * s * 0.10f
+    val hy = y - s * (0.86f + peck * 0.34f)
+    drawCircle(body, s * 0.34f, Offset(hx, hy))
+    drawCircle(red, s * 0.11f, Offset(hx - s * 0.05f, hy - s * 0.30f))
+    drawCircle(red, s * 0.07f, Offset(hx + s * 0.08f, hy - s * 0.24f))
+    // beak
+    drawOval(Color(0xFFE8A63C), Offset(hx + s * 0.22f, hy - s * 0.10f), Size(s * 0.28f, s * 0.15f))
+    drawCircle(Color(0xFF3A3226), s * 0.045f, Offset(hx + s * 0.10f, hy - s * 0.07f))
+    // wattle
+    drawCircle(red, s * 0.06f, Offset(hx + s * 0.22f, hy + s * 0.10f))
 }
 
 private fun DrawScope.fawn(x: Float, y: Float, s: Float, drink: Float, w: Float) {

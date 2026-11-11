@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
+import org.json.JSONTokener
 import java.io.ByteArrayInputStream
 import java.util.Locale
 
@@ -94,6 +96,24 @@ private val BRIGHTNESS_PROBE_JS = """
 })();
 """.trimIndent()
 
+/**
+ * Renders the scene's canvas into a small PNG data URL. Used once per scene to create
+ * the real preview photo shown on cards and in the scene picker.
+ */
+private val SNAPSHOT_JS = """
+(function () {
+  try {
+    var c = document.querySelector('canvas');
+    if (!c || !c.width || !c.height) return '';
+    var w = 360, h = Math.max(1, Math.round(360 * c.height / c.width));
+    var t = document.createElement('canvas');
+    t.width = w; t.height = h;
+    t.getContext('2d').drawImage(c, 0, 0, w, h);
+    return t.toDataURL('image/png');
+  } catch (e) { return ''; }
+})();
+""".trimIndent()
+
 /** A WebView that never takes touches, so the Compose parent owns taps and swipes. */
 private class PassiveWebView(context: Context) : WebView(context) {
     override fun onTouchEvent(event: MotionEvent?): Boolean = false
@@ -137,13 +157,15 @@ fun HtmlSceneLayer(
     placeholderBottom: Color = Color(0xFFE6EDE6),
     onDarkScene: (Boolean) -> Unit = {},
     onReady: () -> Unit = {},
-    onError: () -> Unit = {}
+    onError: () -> Unit = {},
+    onSnapshot: (String) -> Unit = {}
 ) {
     val ready = remember { mutableStateOf(false) }
     val initialized = remember { mutableStateOf(false) }
     val webRef = remember { mutableStateOf<WebView?>(null) }
     val fade = remember { Animatable(0f) }
     val main = remember { Handler(Looper.getMainLooper()) }
+    val snapshotSent = remember { mutableStateOf(false) }
 
     LaunchedEffect(ready.value) {
         if (ready.value) {
@@ -169,6 +191,27 @@ fun HtmlSceneLayer(
             view.evaluateJavascript(
                 "window.zikrScene&&window.zikrScene.setProgress(${jsFloat(progress)})", null
             )
+        }
+    }
+
+    // Give a freshly drawn scene a moment, then grab its canvas as a preview photo.
+    LaunchedEffect(ready.value) {
+        if (!ready.value) return@LaunchedEffect
+        val view = webRef.value ?: return@LaunchedEffect
+        repeat(3) {
+            delay(900)
+            if (snapshotSent.value) return@LaunchedEffect
+            view.evaluateJavascript(SNAPSHOT_JS) { result ->
+                if (!snapshotSent.value) {
+                    val url = runCatching {
+                        JSONTokener(result ?: "").nextValue() as? String
+                    }.getOrNull()
+                    if (!url.isNullOrBlank() && url.startsWith("data:image") && url.length > 400) {
+                        snapshotSent.value = true
+                        onSnapshot(url)
+                    }
+                }
+            }
         }
     }
 

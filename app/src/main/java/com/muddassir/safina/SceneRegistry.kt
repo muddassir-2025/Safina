@@ -33,17 +33,60 @@ private const val ASTAGHFIRULLAH = "أَسْتَغْفِرُ اللَّهَ"
 private const val ASTAGHFIRULLAH_EN = "Astaghfirullah · I seek Allah's forgiveness"
 private const val DEFAULT_TARGET = 100
 
-/** Default dhikr list: one Astaghfirullah per scene. A future dashboard can edit/reorder this. */
-fun defaultZikrs(): List<Zikr> = Scenes.all.map { scene ->
+/**
+ * The six dhikr that ship with the app. They are ordinary cards: editable,
+ * reorderable and deletable exactly like ones the user adds.
+ */
+fun defaultZikrs(): List<Zikr> = listOf(
     Zikr(
-        id = "zikr_${scene.id}",
+        id = "zikr_garden",
+        arabic = "سُبْحَانَ اللّٰهِ",
+        translation = "SubhanAllah · Glory be to Allah.",
+        target = DEFAULT_TARGET,
+        sceneId = "garden",
+        count = 0
+    ),
+    Zikr(
+        id = "zikr_winter",
+        arabic = "الْحَمْدُ لِلّٰهِ",
+        translation = "Alhamdulillah · All praise is for Allah.",
+        target = DEFAULT_TARGET,
+        sceneId = "winter",
+        count = 0
+    ),
+    Zikr(
+        id = "zikr_ocean",
+        arabic = "اللّٰهُ أَكْبَرُ",
+        translation = "Allahu Akbar · Allah is the Greatest.",
+        target = DEFAULT_TARGET,
+        sceneId = "ocean",
+        count = 0
+    ),
+    Zikr(
+        id = "zikr_night",
         arabic = ASTAGHFIRULLAH,
         translation = ASTAGHFIRULLAH_EN,
         target = DEFAULT_TARGET,
-        sceneId = scene.id,
+        sceneId = "night",
+        count = 0
+    ),
+    Zikr(
+        id = "zikr_tahlil",
+        arabic = "لَا إِلَٰهَ إِلَّا اللّٰهُ",
+        translation = "La ilaha illallah · There is no god worthy of worship except Allah.",
+        target = DEFAULT_TARGET,
+        sceneId = "night",
+        count = 0
+    ),
+    Zikr(
+        id = "zikr_salawat",
+        arabic = "اللَّهُمَّ صَلِّ عَلَىٰ مُحَمَّدٍ",
+        translation = "O Allah, send blessings upon Muhammad ﷺ.",
+        target = DEFAULT_TARGET,
+        sceneId = "winter",
         count = 0
     )
-}
+)
 
 const val MAX_HTML_BYTES = 2 * 1024 * 1024
 const val HTML_SCENE_PREFIX = "html:"
@@ -120,6 +163,98 @@ class ZikrStore(private val context: Context) {
         }
     }.getOrDefault(emptyList())
 
+    /* ---------- dhikr cards (the dashboard list) ---------- */
+
+    /**
+     * The user's editable dhikr cards, in display order. On first run the previous
+     * scene-per-page list is adopted as cards, so saved counts keep working.
+     */
+    fun loadCards(): List<Zikr> {
+        val raw = prefs.getString("cards", null)
+        if (raw == null) {
+            val initial = load()
+            writeCards(initial)
+            return initial
+        }
+        val parsed = runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val id = o.getString("id")
+                Zikr(
+                    id = id,
+                    arabic = o.optString("arabic", ASTAGHFIRULLAH),
+                    translation = o.optString("translation", ASTAGHFIRULLAH_EN),
+                    target = o.optInt("target", DEFAULT_TARGET).coerceAtLeast(1),
+                    sceneId = o.optString("sceneId", Scenes.all.first().id),
+                    count = countFor(id)
+                )
+            }
+        }.getOrNull()
+        return if (parsed == null) {
+            val initial = load()
+            writeCards(initial)
+            initial
+        } else parsed
+    }
+
+    fun saveCards(cards: List<Zikr>) = writeCards(cards)
+
+    fun addCard(card: Zikr) {
+        writeCards(loadCards() + card)
+        saveCount(card.id, card.count)
+    }
+
+    fun updateCard(card: Zikr) {
+        writeCards(loadCards().map { if (it.id == card.id) card else it })
+    }
+
+    fun deleteCard(id: String) {
+        writeCards(loadCards().filterNot { it.id == id })
+        prefs.edit().remove("count_$id").apply()
+    }
+
+    fun moveCard(from: Int, to: Int) {
+        val list = loadCards().toMutableList()
+        if (from !in list.indices || to !in list.indices || from == to) return
+        list.add(to, list.removeAt(from))
+        writeCards(list)
+    }
+
+    private fun writeCards(cards: List<Zikr>) {
+        val arr = JSONArray()
+        cards.forEach { z ->
+            arr.put(
+                JSONObject()
+                    .put("id", z.id)
+                    .put("arabic", z.arabic)
+                    .put("translation", z.translation)
+                    .put("target", z.target)
+                    .put("sceneId", z.sceneId)
+            )
+        }
+        prefs.edit().putString("cards", arr.toString()).apply()
+    }
+
+    /* ---------- preferences ---------- */
+
+    var soundEnabled: Boolean
+        get() = prefs.getBoolean("sound_on", true)
+        set(value) { prefs.edit().putBoolean("sound_on", value).apply() }
+
+    var vibrationEnabled: Boolean
+        get() = prefs.getBoolean("vibrate_on", true)
+        set(value) { prefs.edit().putBoolean("vibrate_on", value).apply() }
+
+    /** null means "follow the system"; a value is the user's explicit choice. */
+    var darkModeOverride: Boolean?
+        get() = if (prefs.contains("dark_mode")) prefs.getBoolean("dark_mode", false) else null
+        set(value) {
+            val editor = prefs.edit()
+            if (value == null) editor.remove("dark_mode") else editor.putBoolean("dark_mode", value)
+            editor.apply()
+        }
+
     private fun saveCustomScenes(list: List<HtmlSceneMeta>) {
         val arr = JSONArray()
         list.forEach { m ->
@@ -144,6 +279,12 @@ class ZikrStore(private val context: Context) {
         saveCustomScenes(customScenes().filterNot { it.id == id })
         prefs.edit().remove("count_zikr_html_$id").apply()
         deleteHtml(id)
+        // Cards using this scene fall back to the first built-in scene instead of breaking.
+        val fallback = Scenes.all.first().id
+        val updated = loadCards().map {
+            if (it.sceneId == "$HTML_SCENE_PREFIX$id") it.copy(sceneId = fallback) else it
+        }
+        writeCards(updated)
     }
 
     private fun sceneDir(): File = File(context.filesDir, "scenes").apply { mkdirs() }
@@ -165,5 +306,22 @@ class ZikrStore(private val context: Context) {
 
     fun deleteHtml(id: String) {
         runCatching { htmlFile(id).delete() }
+        runCatching { thumbnailFile(id).delete() }
+    }
+
+    /* ---------- scene thumbnails (a real snapshot of the scene) ---------- */
+
+    fun thumbnailFile(id: String): File = File(sceneDir(), "$id.thumb.png")
+
+    fun hasThumbnail(id: String): Boolean = thumbnailFile(id).length() > 0L
+
+    fun saveThumbnail(id: String, bytes: ByteArray): Boolean = runCatching {
+        require(bytes.isNotEmpty())
+        thumbnailFile(id).writeBytes(bytes)
+        true
+    }.getOrDefault(false)
+
+    fun deleteThumbnail(id: String) {
+        runCatching { thumbnailFile(id).delete() }
     }
 }
