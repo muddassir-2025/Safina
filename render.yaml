@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: safina-api
+    runtime: node
+    plan: free
+    # Match the Neon project's ap-southeast-1 region to keep DB round trips short.
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22.16.0"
+
+      # From `neon deploy` / `neon env pull` (pooled + direct).
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+
+      # Neon Auth (Managed Better Auth).
+      - key: NEON_AUTH_BASE_URL
+        sync: false
+      - key: NEON_AUTH_JWKS_URL
+        sync: false
+
+      # Only needed when SCENE_STORAGE=s3 (Neon Object Storage).
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_ENDPOINT_URL_S3
+        sync: false
+      - key: AWS_REGION
+        sync: false
+
+      - key: SCENE_STORAGE
+        value: postgres
+      - key: SCENE_BUCKET
+        value: assets
+
+      # Single admin account. No sign-up, no admin row.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: ADMIN_JWT_SECRET
+        sync: false

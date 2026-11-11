@@ -73,6 +73,13 @@ fun ZikrApp() {
     var htmlVersion by remember { mutableIntStateOf(0) }
     var thumbVersion by remember { mutableIntStateOf(0) }
 
+    // Seed the bundled default scenes once, on first launch.
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { store.ensureBundledDefaults() }
+        uploaded = store.customScenes()
+        htmlVersion++
+    }
+
     var soundEnabled by remember { mutableStateOf(store.soundEnabled) }
     var vibrationEnabled by remember { mutableStateOf(store.vibrationEnabled) }
     val systemDark = isSystemInDarkTheme()
@@ -294,26 +301,16 @@ fun ZikrApp() {
                     onStudio = { screen = AppScreen.Studio }
                 )
 
-                AppScreen.Studio -> SceneStudioScreen(
-                    time = clockTime,
-                    scenes = uploaded,
+                AppScreen.Studio -> SceneStudioHost(
+                    store = store,
                     settings = baseSettings,
                     thumbVersion = thumbVersion,
+                    time = clockTime,
                     onBack = { screen = AppScreen.Dashboard },
-                    onUpload = { openUpload() },
-                    onCopyInstructions = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("Scene instructions", instructions))
-                        toast(context, "Copied")
-                    },
-                    onSaveExample = { exampleLauncher.launch("garden_reference.html") },
-                    onReplace = {
-                        replaceRequestId = it.id
-                        pickLauncher.launch(arrayOf("text/html", "*/*"))
-                    },
-                    onRename = { renameTarget = it },
-                    onDelete = { deleteSceneTarget = it },
-                    onPreview = { previewScene = it }
+                    onLibraryChanged = {
+                        uploaded = store.customScenes()
+                        htmlVersion++
+                    }
                 )
             }
         }
@@ -424,12 +421,12 @@ fun ZikrApp() {
 
 /* ---------- upload helpers ---------- */
 
-private fun looksLikeHtml(bytes: ByteArray): Boolean {
+internal fun looksLikeHtml(bytes: ByteArray): Boolean {
     val head = bytes.decodeToString(0, minOf(bytes.size, 1024)).lowercase()
     return "<html" in head || "<!doctype html" in head || "<canvas" in head
 }
 
-private fun nameFromHtml(bytes: ByteArray, uri: Uri): String {
+internal fun nameFromHtml(bytes: ByteArray, uri: Uri): String {
     val head = bytes.decodeToString(0, minOf(bytes.size, 8192))
     val title = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         .find(head)?.groupValues?.getOrNull(1)
@@ -440,7 +437,7 @@ private fun nameFromHtml(bytes: ByteArray, uri: Uri): String {
     return segment.substringBeforeLast('.').take(48).ifBlank { "My scene" }
 }
 
-private fun toast(context: Context, message: String) {
+internal fun toast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
 

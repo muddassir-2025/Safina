@@ -268,6 +268,81 @@ class ZikrStore(private val context: Context) {
         return true
     }
 
+    /* ---------- server-managed default scenes ---------- */
+
+    /** ETag of the last successful /default-scenes sync. */
+    var defaultsEtag: String?
+        get() = prefs.getString("defaults_etag", null)
+        set(value) {
+            prefs.edit().putString("defaults_etag", value).apply()
+        }
+
+    /**
+     * Reconciles the admin-managed default scenes into the local list.
+     *
+     * Bundled scenes are left alone (they are the offline fallback). Server
+     * defaults that were deleted move an edited copy to Private rather than
+     * destroying the user's work.
+     */
+    fun applyRemoteDefaults(items: List<RemoteDefaultScene>) {
+        val known = items.associateBy { serverDefaultId(it.id) }
+        val list = customScenes().toMutableList()
+
+        // Remove server defaults the admin deleted.
+        val iterator = list.listIterator()
+        while (iterator.hasNext()) {
+            val meta = iterator.next()
+            if (!isServerDefault(meta) || meta.id in known.keys) continue
+            if (meta.modified) {
+                iterator.set(
+                    meta.copy(source = SCENE_SOURCE_PRIVATE, isDefault = false, modified = true)
+                )
+            } else {
+                iterator.remove()
+                deleteHtml(meta.id)
+            }
+        }
+
+        // Add or update the rest.
+        known.forEach { (localId, remote) ->
+            val bytes = remote.html.toByteArray()
+            if (bytes.isEmpty() || bytes.size > MAX_HTML_BYTES) return@forEach
+            val index = list.indexOfFirst { it.id == localId }
+            if (index < 0) {
+                if (saveHtml(localId, bytes)) {
+                    list += HtmlSceneMeta(
+                        id = localId,
+                        name = remote.title.take(40),
+                        fileName = "$localId.html",
+                        addedAt = System.currentTimeMillis(),
+                        isDefault = true,
+                        defaultKey = remote.id,
+                        modified = false,
+                        source = SCENE_SOURCE_DEFAULT,
+                        version = remote.version
+                    )
+                }
+                return@forEach
+            }
+            val meta = list[index]
+            // Never overwrite an edited copy; the user keeps their version.
+            if (meta.modified || meta.version >= remote.version) return@forEach
+            if (saveHtml(localId, bytes)) {
+                deleteThumbnail(localId)
+                list[index] = meta.copy(name = remote.title.take(40), version = remote.version)
+            }
+        }
+
+        saveCustomScenes(list)
+    }
+
+    private fun isServerDefault(meta: HtmlSceneMeta): Boolean =
+        meta.isDefault &&
+            meta.source == SCENE_SOURCE_DEFAULT &&
+            BundledScenes.byKey(meta.defaultKey) == null
+
+    private fun serverDefaultId(remoteId: String) = "default_srv_$remoteId"
+
     fun updateSceneMeta(id: String, transform: (HtmlSceneMeta) -> HtmlSceneMeta) {
         saveCustomScenes(customScenes().map { if (it.id == id) transform(it) else it })
     }

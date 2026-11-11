@@ -239,6 +239,32 @@ fun SceneStudioHost(
         } else toast(context, "Couldn't save the scene")
     }
 
+    fun cachePublicScene(scene: PublicScene, token: String?, store: ZikrStore, socket: Any?) {
+        scope.launch {
+            try {
+                val full = scene.html?.let { scene } ?: Api.getPublicScene(scene.id, token)
+                val html = full.html ?: return@launch
+                val localId = publicLocalId(scene.id)
+                store.upsertSavedPublic(
+                    HtmlSceneMeta(
+                        id = localId,
+                        name = scene.title,
+                        fileName = "$localId.html",
+                        addedAt = System.currentTimeMillis(),
+                        source = SCENE_SOURCE_PUBLIC,
+                        remoteId = scene.id,
+                        author = scene.author,
+                        savedCount = scene.savedCount
+                    ),
+                    html.toByteArray()
+                )
+                refresh()
+            } catch (_: Exception) {
+                toast(context, "Couldn't cache that scene")
+            }
+        }
+    }
+
     fun publish(bytes: ByteArray, title: String) {
         val token = CloudSession.token
         if (token == null) {
@@ -272,32 +298,6 @@ fun SceneStudioHost(
             return
         }
         publish(bytes, meta.name)
-    }
-
-    fun cachePublicScene(scene: PublicScene, token: String?, store: ZikrStore, socket: Any?) {
-        scope.launch {
-            try {
-                val full = scene.html?.let { scene } ?: Api.getPublicScene(scene.id, token)
-                val html = full.html ?: return@launch
-                val localId = publicLocalId(scene.id)
-                store.upsertSavedPublic(
-                    HtmlSceneMeta(
-                        id = localId,
-                        name = scene.title,
-                        fileName = "$localId.html",
-                        addedAt = System.currentTimeMillis(),
-                        source = SCENE_SOURCE_PUBLIC,
-                        remoteId = scene.id,
-                        author = scene.author,
-                        savedCount = scene.savedCount
-                    ),
-                    html.toByteArray()
-                )
-                refresh()
-            } catch (_: Exception) {
-                toast(context, "Couldn't cache that scene")
-            }
-        }
     }
 
     fun savePublic(scene: PublicScene, collectionId: String?) {
@@ -375,6 +375,31 @@ fun SceneStudioHost(
         onDeletePrivate = { deleteTarget = it },
         onResetDefault = { resetTarget = it },
         onAdminDeleteDefault = { remote -> deleteDefaultTarget = remote },
+        onAdminUpdateDefault = { meta ->
+            val token = AdminSession.token
+            val serverId = meta.defaultKey
+            val html = store.readHtml(meta.id)
+            if (token == null || serverId == null || html == null) {
+                toast(context, "Couldn't update that scene")
+            } else scope.launch {
+                try {
+                    Api.adminUpdateDefault(token, serverId, meta.name, html, 100)
+                    refresh()
+                    toast(context, "Updated for everyone")
+                } catch (e: Exception) {
+                    toast(context, readableError(e))
+                }
+            }
+        },
+        onAdminDeleteLocalDefault = { meta ->
+            scope.launch {
+                val token = AdminSession.token ?: return@launch
+                runCatching { Api.adminDeleteDefault(token, meta.defaultKey ?: "") }
+                store.removeCustomScene(meta.id)
+                refresh()
+                toast(context, "Default scene deleted")
+            }
+        },
         onReport = { reportTarget = it },
         onSavePublic = { scene -> savePublic(scene, null) },
         onUnsavePublic = { unsavePublic(it) },
@@ -647,6 +672,7 @@ fun SceneStudioScreen(
     onResetDefault: (HtmlSceneMeta) -> Unit,
     onAdminDeleteDefault: (RemoteDefaultScene) -> Unit,
     onAdminDeleteLocalDefault: (HtmlSceneMeta) -> Unit,
+    onAdminUpdateDefault: (HtmlSceneMeta) -> Unit,
     onReport: (PublicScene) -> Unit,
     onSavePublic: (PublicScene) -> Unit,
     onUnsavePublic: (PublicScene) -> Unit,
@@ -797,15 +823,10 @@ fun SceneStudioScreen(
                                 onReset = if (meta.modified) ({ onResetDefault(meta) }) else null,
                                 onDelete = null,
                                 onAdminDelete = if (AdminSession.active && meta.defaultKey != null && BundledScenes.byKey(meta.defaultKey) == null) {
-                                    {
-                                        scope.launch {
-                                            val token = AdminSession.token ?: return@launch
-                                            runCatching { Api.adminDeleteDefault(token, meta.defaultKey) }
-                                            store.removeCustomScene(meta.id)
-                                            refresh()
-                                            toast(context, "Default scene deleted")
-                                        }
-                                    }
+                                    { onAdminDeleteLocalDefault(meta) }
+                                } else null,
+                                onAdminUpdate = if (AdminSession.active && meta.defaultKey != null && BundledScenes.byKey(meta.defaultKey) == null) {
+                                    { onAdminUpdateDefault(meta) }
                                 } else null,
                                 onPublish = null
                             )
@@ -984,7 +1005,8 @@ private fun LocalSceneCard(
     onReset: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     onAdminDelete: (() -> Unit)?,
-    onPublish: (() -> Unit)?
+    onPublish: (() -> Unit)?,
+    onAdminUpdate: (() -> Unit)? = null
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Box(
@@ -1079,6 +1101,12 @@ private fun LocalSceneCard(
                     DropdownMenuItem(
                         text = { Text("Delete", fontSize = 13.sp, color = Color(0xFFB06A5C)) },
                         onClick = { menuOpen = false; it() }
+                    )
+                }
+                if (admin && onAdminUpdate != null) {
+                    DropdownMenuItem(
+                        text = { Text("Update for everyone", fontSize = 13.sp) },
+                        onClick = { menuOpen = false; onAdminUpdate() }
                     )
                 }
                 if (admin && onAdminDelete != null) {
@@ -1275,17 +1303,18 @@ private fun ScenePreviewOverlay(
 /* Misc helpers                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Fires [action] only when the finger stays down for [millis]. `onPress` runs in
+ * a PressGestureScope, where a timeout can wrap `tryAwaitRelease()` — the pointer
+ * gesture scope itself forbids general suspending calls.
+ */
 fun Modifier.longPressMillis(millis: Long, action: () -> Unit): Modifier = pointerInput(millis) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        val released = kotlinx.coroutines.withTimeoutOrNull(millis) {
-            waitForUpOrCancellation()
+    detectTapGestures(
+        onPress = {
+            val releasedInTime = kotlinx.coroutines.withTimeoutOrNull(millis) { tryAwaitRelease() }
+            if (releasedInTime == null) action()
         }
-        if (released == null) {
-            action()
-            waitForUpOrCancellation()
-        }
-    }
+    )
 }
 
 private fun formatDate(epoch: Long): String =

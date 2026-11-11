@@ -4,7 +4,7 @@ package com.muddassir.safina
  * The six scenes that ship inside the APK.
  *
  * Four were recovered from the user's own uploads (the WebView copies stored in
- * `/data/data/com.muddassir.safina/files/scenes/*.html`); two are the HTML files
+ * `/data/data/com.muddassir.safina/files/scenes/` as `<id>.html`); two are the HTML files
  * that were already in `app/src/main/assets` (`garden_reference.html` and
  * `test_dots.html`). They are copied into local storage on first launch so they
  * can be renamed, replaced, and reset like any other scene.
