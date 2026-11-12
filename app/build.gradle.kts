@@ -16,7 +16,7 @@ val keystoreProps = Properties().apply {
 // Backend deployed on Neon (Function `api`, production branch).
 // Local dev: -Psafina.apiBaseUrl=http://10.0.2.2:8080
 val safinaApiBaseUrl = (project.findProperty("safina.apiBaseUrl") as String?)
-    ?: "https://safina-rwo6.onrender.com"
+    ?: "https://br-quiet-dew-a1bz1a6p-api.compute.c-1.ap-southeast-1.aws.neon.tech"
 
 android {
     namespace = "com.muddassir.safina"
