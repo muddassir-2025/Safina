@@ -17,6 +17,7 @@ import {
 import {
   bearer,
   signAdminToken,
+  signReviewerToken,
   verifyAdminToken,
   verifyUserToken,
   type SceneUser,
@@ -366,6 +367,37 @@ app.post("/auth/report", async (c) => {
     : undefined;
   console.log("auth relay", JSON.stringify({ reason, params, shape }));
   return c.json({ ok: true });
+});
+
+/* ---------------- passwordless (reviewer) sign-in ---------------- */
+
+app.post("/auth/review", async (c) => {
+  const body = await jsonBody(c);
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!email || !email.includes("@")) {
+    throw new HttpError(400, "A valid email is required", "INVALID_EMAIL");
+  }
+
+  const cfg = config();
+  const allowed = new Set<string>();
+  const reviewerEnv = (process.env.REVIEWER_EMAIL ?? "playconsole@example.com").toLowerCase();
+  allowed.add(reviewerEnv);
+  allowed.add(cfg.ADMIN_EMAIL.toLowerCase());
+
+  // Allow any email that already has a profile row (manually added in Neon).
+  const existingProfile = await db
+    .select()
+    .from(profiles)
+    .where(sql`lower(${profiles.email}) = ${email}`)
+    .limit(1);
+  const profile = existingProfile[0];
+
+  if (!allowed.has(email) && !profile) {
+    throw new HttpError(401, "This email is not allowed to sign in", "NOT_ALLOWED");
+  }
+
+  const { token, expiresAt } = await signReviewerToken(email);
+  return c.json({ token, expiresAt });
 });
 
 /* ---------------- public scenes ---------------- */

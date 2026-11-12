@@ -29,16 +29,20 @@ function issuer(): string {
  */
 export async function verifyUserToken(token: string | undefined | null): Promise<SceneUser | null> {
   if (!token) return null;
+  // Try Neon Auth (EdDSA) first.
   try {
     const { payload } = await jwtVerify(token, jwks(), { issuer: issuer() });
-    if (!payload.sub) return null;
-    return {
-      userId: payload.sub,
-      email: typeof payload.email === "string" ? payload.email : null,
-    };
+    if (payload.sub) {
+      return {
+        userId: payload.sub,
+        email: typeof payload.email === "string" ? payload.email : null,
+      };
+    }
   } catch {
-    return null;
+    // fall through to reviewer token
   }
+  // Reviewer (passwordless email) token.
+  return verifyReviewerToken(token);
 }
 
 export function bearer(header: string | undefined | null): string | null {
@@ -85,6 +89,45 @@ export async function verifyAdminToken(token: string | undefined | null): Promis
       email: payload.sub,
       role: "admin",
       exp: typeof payload.exp === "number" ? payload.exp : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reviewer (passwordless email) identity for Play Console testing     */
+/* ------------------------------------------------------------------ */
+
+const REVIEWER_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+export async function signReviewerToken(email: string): Promise<{ token: string; expiresAt: number }> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = nowSec + REVIEWER_TTL_SECONDS;
+  const subject = `reviewer:${email.toLowerCase()}`;
+  const token = await new SignJWT({ role: "reviewer", email })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setSubject(subject)
+    .setIssuedAt(nowSec)
+    .setIssuer("safina-reviewer")
+    .setAudience("safina-reviewer")
+    .setExpirationTime(exp)
+    .sign(adminKey());
+  return { token, expiresAt: exp * 1000 };
+}
+
+export async function verifyReviewerToken(token: string | undefined | null): Promise<SceneUser | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, adminKey(), {
+      issuer: "safina-reviewer",
+      audience: "safina-reviewer",
+    });
+    if (typeof payload.sub !== "string") return null;
+    if (payload.role !== "reviewer") return null;
+    return {
+      userId: payload.sub,
+      email: typeof payload.email === "string" ? payload.email : null,
     };
   } catch {
     return null;

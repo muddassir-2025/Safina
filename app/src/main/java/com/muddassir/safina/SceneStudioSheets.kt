@@ -1425,9 +1425,8 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 fun SignInSheet(onDismiss: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
     var otherWays by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -1471,8 +1470,6 @@ fun SignInSheet(onDismiss: () -> Unit) {
         if (otherWays) {
             Spacer(Modifier.height(10.dp))
             Field(email, "Email", { email = it })
-            Spacer(Modifier.height(10.dp))
-            Field(password, "Password", { password = it })
             if (error != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(error!!, fontSize = 11.5.sp, color = Color(0xFFB06A5C))
@@ -1480,13 +1477,19 @@ fun SignInSheet(onDismiss: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             PrimaryButton(
                 if (busy) "Please wait…" else "Sign in",
-                enabled = !busy && email.isNotBlank() && password.length >= 6
+                enabled = !busy && email.isNotBlank() && email.contains('@')
             ) {
                 busy = true
                 error = null
-                CloudSession.signInWithEmail(context, email.trim(), password, false) { ok, msg ->
-                    busy = false
-                    if (ok) onDismiss() else error = msg
+                scope.launch {
+                    try {
+                        CloudSession.signInWithEmail(email.trim())
+                        busy = false
+                        onDismiss()
+                    } catch (e: Exception) {
+                        busy = false
+                        error = e.message ?: "Sign-in failed"
+                    }
                 }
             }
         }

@@ -327,6 +327,14 @@ object Api {
 
     /* ---------------- admin ---------------- */
 
+    suspend fun reviewLogin(email: String): String = withColdStartRetry {
+        val root = obj(
+            "POST", "/auth/review",
+            body = JSONObject().put("email", email)
+        ) ?: throw ApiException(0, "Empty response")
+        root.optString("token").ifBlank { throw ApiException(0, "Sign-in failed") }
+    }
+
     suspend fun adminLogin(email: String, password: String): Pair<String, Long> = withColdStartRetry {
         val root = obj(
             "POST", "/admin/login",
@@ -534,25 +542,18 @@ object CloudSession {
         }
     }
 
-    /** Alternative email/password sign-in via Firebase Auth (for Play review). */
-    fun signInWithEmail(
-        context: Context,
-        email: String,
-        password: String,
-        create: Boolean,
-        onResult: (Boolean, String?) -> Unit
-    ) {
-        val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-        val task = auth.signInWithEmailAndPassword(email, password)
-        task.addOnCompleteListener { r ->
-            if (r.isSuccessful) {
-                emailSignedIn = true
-                emailUser = r.result?.user?.email ?: email
-                onResult(true, null)
-            } else {
-                onResult(false, r.exception?.localizedMessage ?: "Sign-in failed")
-            }
+    /** Email-only sign-in for Play review (no password). Calls the backend to obtain a JWT. */
+    suspend fun signInWithEmail(email: String) {
+        if (email.isBlank() || !email.contains('@')) {
+            throw ApiException(400, "Enter a valid email")
         }
+        val jwt = Api.reviewLogin(email.trim())
+        if (jwt.isBlank()) throw ApiException(0, "Sign-in failed")
+        token = jwt
+        emailUser = email.trim()
+        emailSignedIn = true
+        prefs?.edit()?.putString(KEY_TOKEN, jwt)?.apply()
+        refreshProfile()
     }
 
     /** Called by MainActivity when Chrome hands `safina://auth?token=...` back. */
