@@ -248,34 +248,26 @@ app.put("/profile/channel", async (c) => {
  * JWT from Neon Auth and hand it to the app through the `safina://auth` deep
  * link. Keep the JWT out of any other page.
  */
-app.get("/auth/google/start", (c) => {
+app.get("/auth/google/start", async (c) => {
   const cfg = config();
   const authBase = cfg.NEON_AUTH_BASE_URL.replace(/\/$/, "");
   const redirect = c.req.query("redirect") || "safina://auth";
   // Derive the public origin from the request so this works on any host.
   const origin = new URL(c.req.url).origin;
   const callback = `${origin}/auth/callback?redirect=${encodeURIComponent(redirect)}`;
-  const html = `<!doctype html><meta charset="utf-8"><title>Signing in…</title>
-<body style="font-family:system-ui;padding:2rem">
-<p>Redirecting to Google…</p>
-<script>
-(async () => {
   try {
-    const res = await fetch(${JSON.stringify(authBase + "/sign-in/social")}, {
+    const res = await fetch(authBase + "/sign-in/social", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ provider: "google", callbackURL: ${JSON.stringify(callback)} })
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ provider: "google", callbackURL: callback }),
     });
-    const data = await res.json();
-    if (data && data.url) { location.replace(data.url); return; }
-    document.body.textContent = (data && data.message) || "Could not start Google sign-in.";
+    const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string };
+    if (data.url) return c.redirect(data.url, 302);
+    throw new HttpError(500, data.message || "Could not start Google sign-in");
   } catch (e) {
-    document.body.textContent = "Could not start Google sign-in.";
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(500, "Could not start Google sign-in");
   }
-})();
-</script></body>`;
-  return c.html(html);
 });
 
 app.get("/auth/callback", (c) => {
