@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -83,7 +84,7 @@ private fun shortDate(epoch: Long): String =
 
 /** Full-width bottom sheet on a dimmed backdrop. */
 @Composable
-private fun Sheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun Sheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
@@ -97,6 +98,8 @@ private fun Sheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> 
                 .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
                 .background(SafinaSurface)
                 .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
                 .clickable(enabled = false) {}
                 .padding(horizontal = 22.dp, vertical = 20.dp),
             content = content
@@ -1413,5 +1416,79 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             maxLines = 1
         )
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Sign-in menu (Google + other ways) for Play review                 */
+/* ------------------------------------------------------------------ */
+
+@Composable
+fun SignInSheet(onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var otherWays by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Sheet(onDismiss) {
+        SheetTitle("Sign in", "Choose how you'd like to continue.")
+        Spacer(Modifier.height(14.dp))
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(15.dp))
+                .background(SafinaField)
+                .border(1.dp, SafinaBorder, RoundedCornerShape(15.dp))
+                .clickable(enabled = !busy) {
+                    busy = true
+                    CloudSession.signIn(context)
+                    busy = false
+                    onDismiss()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("G", fontSize = 16.sp, color = SafinaInk, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(10.dp))
+                Text("Continue with Google", fontSize = 13.sp, color = SafinaInk, fontWeight = FontWeight.Medium)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Other ways",
+            fontSize = 12.sp,
+            color = SafinaAccent,
+            modifier = Modifier
+                .clickable { otherWays = !otherWays }
+                .padding(vertical = 4.dp)
+        )
+
+        if (otherWays) {
+            Spacer(Modifier.height(10.dp))
+            Field(email, "Email", { email = it })
+            Spacer(Modifier.height(10.dp))
+            Field(password, "Password", { password = it })
+            if (error != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(error!!, fontSize = 11.5.sp, color = Color(0xFFB06A5C))
+            }
+            Spacer(Modifier.height(12.dp))
+            PrimaryButton(
+                if (busy) "Please wait…" else "Sign in",
+                enabled = !busy && email.isNotBlank() && password.length >= 6
+            ) {
+                busy = true
+                error = null
+                CloudSession.signInWithEmail(context, email.trim(), password, false) { ok, msg ->
+                    busy = false
+                    if (ok) onDismiss() else error = msg
+                }
+            }
+        }
     }
 }

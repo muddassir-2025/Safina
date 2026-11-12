@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
+    implementation(libs.firebase.auth)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.security.crypto)
     testImplementation(libs.junit)

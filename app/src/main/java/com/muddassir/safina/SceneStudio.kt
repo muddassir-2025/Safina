@@ -155,7 +155,7 @@ fun SceneStudioHost(
     }
 
     LaunchedEffect(CloudSession.token) {
-        if (CloudSession.signedIn) CloudSession.refreshProfile()
+        if (CloudSession.token != null) CloudSession.refreshProfile()
     }
 
     /* ---------------- default scene sync (fails silently offline) ---------------- */
@@ -281,7 +281,7 @@ fun SceneStudioHost(
         val token = CloudSession.token
         if (token == null) {
             pendingPublish = bytes to title
-            CloudSession.signIn(context)
+            CloudSession.signInSheetOpen = true
             return
         }
         if (CloudSession.profile?.channelName.isNullOrBlank()) {
@@ -493,7 +493,7 @@ fun SceneStudioHost(
         onAdminReports = { reportsOpen = true },
         onAdminLogin = { adminLoginOpen = true },
         onPublishExisting = { publishExisting(it) },
-        onRequestSignIn = { CloudSession.signIn(context) },
+        onRequestSignIn = { CloudSession.signInSheetOpen = true },
         signedIn = CloudSession.signedIn
     )
 
@@ -513,7 +513,7 @@ fun SceneStudioHost(
                 pendingExisting = null
                 uploadTarget = null
             },
-            onSignIn = { CloudSession.signIn(context) },
+            onSignIn = { CloudSession.signInSheetOpen = true },
             onSave = { target, title ->
                 val data = bytes
                 when {
@@ -681,7 +681,7 @@ fun SceneStudioHost(
             onReport = { reason ->
                 val token = CloudSession.token
                 if (token == null) {
-                    CloudSession.signIn(context)
+                    CloudSession.signInSheetOpen = true
                     toast(context, "Sign in to report a scene")
                 } else scope.launch {
                     runCatching { Api.reportScene(scene.id, reason, token) }

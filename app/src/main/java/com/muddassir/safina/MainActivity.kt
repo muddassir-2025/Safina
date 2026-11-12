@@ -118,7 +118,7 @@ fun ZikrApp() {
         if (!CloudSession.signedIn) return@LaunchedEffect
         withContext(Dispatchers.IO) { CloudSession.refreshProfile() }
         Analytics.signedIn("google")
-        if (CloudSession.profile?.channelName.isNullOrBlank()) channelSheetOpen = true
+        if (CloudSession.token != null && CloudSession.profile?.channelName.isNullOrBlank()) channelSheetOpen = true
     }
 
     var soundEnabled by remember { mutableStateOf(store.soundEnabled) }
@@ -286,9 +286,9 @@ fun ZikrApp() {
         },
         onStudio = { screen = AppScreen.Studio },
         signedIn = CloudSession.signedIn,
-        identity = (CloudSession.profile?.channelName ?: CloudSession.profile?.email)
+        identity = (CloudSession.profile?.channelName ?: CloudSession.profile?.email ?: CloudSession.emailUser)
             ?.let { if (CloudSession.isAdmin) "$it (admin)" else it },
-        onSignIn = { CloudSession.signIn(context) },
+        onSignIn = { CloudSession.signInSheetOpen = true },
         onProfile = { profileOpen = true },
         onSignOut = {
             CloudSession.signOut()
@@ -503,6 +503,10 @@ fun ZikrApp() {
                     scope.launch { CloudSession.refreshProfile() }
                 }
             )
+        }
+
+        if (CloudSession.signInSheetOpen) {
+            SignInSheet(onDismiss = { CloudSession.signInSheetOpen = false })
         }
     }
     }

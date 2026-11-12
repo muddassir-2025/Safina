@@ -488,6 +488,15 @@ object CloudSession {
         private set
     var busy by mutableStateOf(false)
 
+    /** Drives the in-app sign-in sheet (Google + email/password) for Play review. */
+    var signInSheetOpen by mutableStateOf(false)
+
+    /** Email/password (Firebase) alternative sign-in for Play review. */
+    var emailSignedIn by mutableStateOf(false)
+        private set
+    var emailUser by mutableStateOf<String?>(null)
+        private set
+
     private var prefs: android.content.SharedPreferences? = null
 
     fun init(context: Context) {
@@ -511,7 +520,7 @@ object CloudSession {
         else prefs?.edit()?.remove(KEY_TOKEN)?.apply()
     }
 
-    val signedIn: Boolean get() = token != null
+    val signedIn: Boolean get() = token != null || emailSignedIn
 
     val isAdmin: Boolean get() = profile?.isAdmin == true
 
@@ -522,6 +531,27 @@ object CloudSession {
                 .setShowTitle(true)
                 .build()
                 .launchUrl(context, Uri.parse(url))
+        }
+    }
+
+    /** Alternative email/password sign-in via Firebase Auth (for Play review). */
+    fun signInWithEmail(
+        context: Context,
+        email: String,
+        password: String,
+        create: Boolean,
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+        val task = auth.signInWithEmailAndPassword(email, password)
+        task.addOnCompleteListener { r ->
+            if (r.isSuccessful) {
+                emailSignedIn = true
+                emailUser = r.result?.user?.email ?: email
+                onResult(true, null)
+            } else {
+                onResult(false, r.exception?.localizedMessage ?: "Sign-in failed")
+            }
         }
     }
 
@@ -550,6 +580,9 @@ object CloudSession {
     fun signOut() {
         token = null
         profile = null
+        emailSignedIn = false
+        emailUser = null
+        runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().signOut() }
         prefs?.edit()?.remove(KEY_TOKEN)?.apply()
     }
 }

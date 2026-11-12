@@ -86,8 +86,8 @@ export default function Privacy() {
           <h2 className="text-xl font-medium text-white mb-2">Contact</h2>
           <p className="text-slate-400">
             Questions about this policy? Contact us at{' '}
-            <a className="text-teal-300 hover:underline" href="mailto:hello@safina.app">
-              hello@safina.app
+            <a className="text-teal-300 hover:underline" href="mailto:studymuddassir@gmail.com">
+              studymuddassir@gmail.com
             </a>
             .
           </p>
