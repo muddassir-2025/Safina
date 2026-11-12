@@ -266,7 +266,9 @@ app.get("/auth/google/start", async (c) => {
     throw new HttpError(500, data.message || "Could not start Google sign-in");
   } catch (e) {
     if (e instanceof HttpError) throw e;
-    throw new HttpError(500, "Could not start Google sign-in");
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error("[auth/google/start] failed", detail);
+    throw new HttpError(500, `Could not start Google sign-in: ${detail}`);
   }
 });
 
