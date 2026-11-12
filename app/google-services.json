@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1082146890781",
+    "project_id": "safina-127cc",
+    "storage_bucket": "safina-127cc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1082146890781:android:8ffce99b8a9cd9b59b12f4",
+        "android_client_info": {
+          "package_name": "com.muddassir.safina"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXCjPrdk0FFgEAaK9g1uFDlmZP1qbJPRo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

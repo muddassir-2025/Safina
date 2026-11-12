@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+:root { --brand: #0f766e; }
+
+html { scroll-behavior: smooth; }

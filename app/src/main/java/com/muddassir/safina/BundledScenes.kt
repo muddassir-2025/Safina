@@ -19,14 +19,17 @@ data class BundledScene(
 object BundledScenes {
     const val EXAMPLE_ASSET = "defaults/garden.html"
 
+    /**
+     * The two HTML scenes that ship in the Default tab. Garden, Winter, Ocean and
+     * Night are drawn natively (see [Scenes]) and are added by the studio itself.
+     */
     val all: List<BundledScene> = listOf(
-        BundledScene("dawn_garden", "Dawn Garden", "defaults/dawn_garden.html", 0),
-        BundledScene("deep_ocean", "Deep Ocean", "defaults/deep_ocean.html", 1),
-        BundledScene("snow", "Snow", "defaults/snow.html", 2),
-        BundledScene("dark_night", "Dark Night", "defaults/dark_night.html", 3),
-        BundledScene("meadow", "Meadow", "defaults/garden.html", 4),
-        BundledScene("starlight", "Starlight", "defaults/starlight.html", 5)
+        BundledScene("deep_ocean", "Deep Ocean", "defaults/deep_ocean.html", 0),
+        BundledScene("dark_night", "Dark Night", "defaults/dark_night.html", 1)
     )
+
+    /** Bundled HTML scenes from older builds, cleared out of the Default tab. */
+    val retiredKeys: Set<String> = setOf("meadow", "snow", "dawn_garden", "starlight")
 
     fun byKey(key: String?): BundledScene? = all.firstOrNull { it.key == key }
 

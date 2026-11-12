@@ -3,6 +3,7 @@ package com.muddassir.safina
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -47,7 +48,35 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         enableEdgeToEdge()
+        Analytics.init(applicationContext)
+        handleAuthIntent(intent)
         setContent { ZikrApp() }
+    }
+
+    // The Google relay comes back through safina://auth?token=…
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAuthIntent(intent)
+    }
+
+    private fun handleAuthIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "safina") return
+        val token = data.getQueryParameter("token")
+        val parts = token?.count { it == '.' } ?: 0
+        android.util.Log.i(
+            "SafinaAuth",
+            "auth link: params=${data.queryParameterNames} tokenLen=${token?.length ?: 0} jwtParts=$parts"
+        )
+        if (!CloudSession.handleDeepLink(data)) {
+            val reason = when {
+                token == null -> "No token in the sign-in link"
+                else -> "Sign-in link rejected (len=${token.length}, parts=$parts)"
+            }
+            Analytics.signInFailed(if (token == null) "missing_token" else "rejected_token")
+            Toast.makeText(this, reason, Toast.LENGTH_LONG).show()
+        }
     }
 }
 
@@ -65,7 +94,7 @@ fun ZikrApp() {
     val counts = remember {
         mutableStateMapOf<String, Int>().apply { cards.forEach { put(it.id, it.count) } }
     }
-    var uploaded by remember { mutableStateOf(store.customScenes()) }
+    var uploaded by remember { mutableStateOf(store.pickerScenes()) }
     var screen by remember { mutableStateOf(AppScreen.Dashboard) }
     var sessionCardId by remember { mutableStateOf<String?>(null) }
     var editorOpen by remember { mutableStateOf(false) }
@@ -76,8 +105,20 @@ fun ZikrApp() {
     // Seed the bundled default scenes once, on first launch.
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { store.ensureBundledDefaults() }
-        uploaded = store.customScenes()
+        uploaded = store.pickerScenes()
         htmlVersion++
+    }
+
+    var profileOpen by remember { mutableStateOf(false) }
+    var channelSheetOpen by remember { mutableStateOf(false) }
+    var adminDashboardOpen by remember { mutableStateOf(false) }
+
+    // After a Google sign-in, ask for the channel name once.
+    LaunchedEffect(CloudSession.token) {
+        if (!CloudSession.signedIn) return@LaunchedEffect
+        withContext(Dispatchers.IO) { CloudSession.refreshProfile() }
+        Analytics.signedIn("google")
+        if (CloudSession.profile?.channelName.isNullOrBlank()) channelSheetOpen = true
     }
 
     var soundEnabled by remember { mutableStateOf(store.soundEnabled) }
@@ -121,8 +162,13 @@ fun ZikrApp() {
     }
 
     fun setCount(zikrId: String, value: Int) {
+        val before = counts[zikrId] ?: 0
         counts[zikrId] = value
         store.saveCount(zikrId, value)
+        val card = cards.firstOrNull { it.id == zikrId }
+        if (card != null && before < card.target && value >= card.target) {
+            Analytics.sessionCompleted(card.id, card.sceneId, card.target, elapsedSeconds)
+        }
     }
 
     fun saveCard(card: Zikr) {
@@ -238,7 +284,16 @@ fun ZikrApp() {
             darkMode = !darkMode
             store.darkModeOverride = darkMode
         },
-        onStudio = { screen = AppScreen.Studio }
+        onStudio = { screen = AppScreen.Studio },
+        signedIn = CloudSession.signedIn,
+        identity = (CloudSession.profile?.channelName ?: CloudSession.profile?.email)
+            ?.let { if (CloudSession.isAdmin) "$it (admin)" else it },
+        onSignIn = { CloudSession.signIn(context) },
+        onProfile = { profileOpen = true },
+        onSignOut = {
+            CloudSession.signOut()
+            toast(context, "Signed out")
+        }
     )
 
     CompositionLocalProvider(
@@ -308,7 +363,7 @@ fun ZikrApp() {
                     time = clockTime,
                     onBack = { screen = AppScreen.Dashboard },
                     onLibraryChanged = {
-                        uploaded = store.customScenes()
+                        uploaded = store.pickerScenes()
                         htmlVersion++
                     }
                 )
@@ -361,7 +416,7 @@ fun ZikrApp() {
                                 HtmlSceneMeta(newId, name, "$newId.html", System.currentTimeMillis())
                             )
                             snapshot?.let { store.saveThumbnail(newId, it) }
-                            uploaded = store.customScenes()
+                            uploaded = store.pickerScenes()
                             thumbVersion++
                             toast(context, "Scene added · pick it in a dhikr card")
                         } else {
@@ -397,7 +452,7 @@ fun ZikrApp() {
                 onRename = { newName ->
                     store.renameCustomScene(meta.id, newName)
                     renameTarget = null
-                    uploaded = store.customScenes()
+                    uploaded = store.pickerScenes()
                     refreshCards()
                 }
             )
@@ -410,8 +465,42 @@ fun ZikrApp() {
                 onDelete = {
                     store.removeCustomScene(meta.id)
                     deleteSceneTarget = null
-                    uploaded = store.customScenes()
+                    uploaded = store.pickerScenes()
                     refreshCards()
+                }
+            )
+        }
+
+        if (profileOpen) {
+            ProfileSheet(
+                profile = CloudSession.profile,
+                isAdmin = CloudSession.isAdmin,
+                onOpenAdmin = if (CloudSession.isAdmin) {
+                    { profileOpen = false; adminDashboardOpen = true }
+                } else null,
+                onEditChannel = {
+                    profileOpen = false
+                    channelSheetOpen = true
+                },
+                onSignOut = {
+                    CloudSession.signOut()
+                    profileOpen = false
+                    toast(context, "Signed out")
+                },
+                onDismiss = { profileOpen = false }
+            )
+        }
+
+        if (adminDashboardOpen) {
+            AdminDashboardSheet(onDismiss = { adminDashboardOpen = false })
+        }
+
+        if (channelSheetOpen) {
+            ChannelSheet(
+                onDismiss = { channelSheetOpen = false },
+                onSaved = {
+                    channelSheetOpen = false
+                    scope.launch { CloudSession.refreshProfile() }
                 }
             )
         }

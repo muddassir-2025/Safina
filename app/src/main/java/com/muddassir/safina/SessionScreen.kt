@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -107,6 +108,10 @@ fun SessionScreen(
 
     val currentPage = pagerState.currentPage
     val zikr = cards.getOrNull(currentPage)
+    LaunchedEffect(zikr?.id) {
+        val z = zikr ?: return@LaunchedEffect
+        Analytics.sessionStarted(z.id, z.sceneId, z.target)
+    }
     val target = zikr?.target ?: 1
     val count = zikr?.let { counts[it.id] ?: it.count } ?: 0
     val done = zikr != null && count >= target
@@ -339,16 +344,21 @@ fun SessionScreen(
             }
         }
 
-        Text(
-            "Hold to reset", fontSize = 12.sp, color = ink.copy(alpha = 0.55f), style = textStyle,
-            modifier = Modifier
+        Box(
+            Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
+                .clip(RoundedCornerShape(50))
+                .background(ink.copy(alpha = 0.10f))
                 .combinedClickable(onClick = {}, onLongClick = {
                     cards.getOrNull(pagerState.currentPage)?.let { onCount(it.id, 0) }
                 })
-                .padding(14.dp)
-        )
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+        ) {
+            Text(
+                "Hold to reset", fontSize = 12.sp, color = ink.copy(alpha = 0.80f), style = textStyle
+            )
+        }
     }
 }
 

@@ -196,6 +196,37 @@ class ZikrStore(private val context: Context) {
         }
     }.getOrDefault(emptyList())
 
+    /**
+     * Scenes offered when picking a scene for a zikr: defaults first, then private,
+     * then saved public ones — with byte-identical copies collapsed to one entry.
+     */
+    fun pickerScenes(): List<HtmlSceneMeta> {
+        val seen = mutableSetOf<String>()
+        return customScenes()
+            .sortedBy {
+                when (it.source) {
+                    SCENE_SOURCE_DEFAULT -> 0
+                    SCENE_SOURCE_PRIVATE -> 1
+                    else -> 2
+                }
+            }
+            .filter { meta ->
+                val key = fingerprint(meta.id) ?: return@filter false
+                seen.add(key)
+            }
+    }
+
+    private val fingerprints = mutableMapOf<String, String>()
+
+    private fun fingerprint(id: String): String? = fingerprints[id] ?: runCatching {
+        val file = htmlFile(id)
+        if (!file.exists()) return null
+        val head = file.inputStream().use { it.readNBytes(2048) }
+        val key = "${file.length()}:${head.contentHashCode()}"
+        fingerprints[id] = key
+        key
+    }.getOrNull()
+
     fun privateScenes(): List<HtmlSceneMeta> =
         customScenes().filter { it.source == SCENE_SOURCE_PRIVATE }
 
@@ -214,7 +245,15 @@ class ZikrStore(private val context: Context) {
         var changed = false
         BundledScenes.all.forEach { bundled ->
             val id = "default_${bundled.key}"
-            if (list.none { it.id == id || (it.isDefault && it.defaultKey == bundled.key) }) {
+            // An admin can retire a bundled scene for this install.
+            if (bundled.key in hiddenDefaultKeys()) return@forEach
+            // Keep the shipped title in sync unless the user renamed or edited the copy.
+            val existing = list.firstOrNull { it.id == id || (it.isDefault && it.defaultKey == bundled.key) }
+            if (existing != null && !existing.modified && existing.name != bundled.title) {
+                list = list.map { if (it.id == existing.id) it.copy(name = bundled.title) else it }
+                changed = true
+            }
+            if (existing == null) {
                 val bytes = readAsset(bundled.asset)
                 if (bytes != null && bytes.size <= MAX_HTML_BYTES && saveHtml(id, bytes)) {
                     list = list + HtmlSceneMeta(
@@ -230,6 +269,15 @@ class ZikrStore(private val context: Context) {
                     changed = true
                 }
             }
+        }
+        // Drop HTML defaults that older builds shipped and this one doesn't.
+        val retired = list.filter {
+            it.isDefault && it.defaultKey != null && it.defaultKey in BundledScenes.retiredKeys
+        }
+        if (retired.isNotEmpty()) {
+            retired.forEach { deleteHtml(it.id); deleteThumbnail(it.id) }
+            list = list.filter { meta -> retired.none { it.id == meta.id } }
+            changed = true
         }
         if (changed) saveCustomScenes(list)
     }
@@ -358,6 +406,11 @@ class ZikrStore(private val context: Context) {
         deleteHtml(id)
     }
 
+    /** Drops a scene from the saved list but keeps its cached art for Explore. */
+    fun forgetSavedPublic(id: String) {
+        saveCustomScenes(customScenes().filterNot { it.id == id })
+    }
+
     fun readAsset(name: String): ByteArray? =
         runCatching { context.assets.open(name).use { it.readBytes() } }.getOrNull()
 
@@ -483,6 +536,16 @@ class ZikrStore(private val context: Context) {
         saveCustomScenes(customScenes().map { if (it.id == id) it.copy(name = name) else it })
     }
 
+    /** Bundled scenes an admin removed from the Default tab on this device. */
+    fun hiddenDefaultKeys(): Set<String> =
+        prefs.getStringSet("hidden_defaults", emptySet())?.toSet() ?: emptySet()
+
+    fun hideDefaultScene(meta: HtmlSceneMeta) {
+        val key = meta.defaultKey ?: return
+        prefs.edit().putStringSet("hidden_defaults", hiddenDefaultKeys() + key).apply()
+        removeCustomScene(meta.id)
+    }
+
     fun removeCustomScene(id: String) {
         saveCustomScenes(customScenes().filterNot { it.id == id })
         prefs.edit().remove("count_zikr_html_$id").apply()
@@ -502,6 +565,7 @@ class ZikrStore(private val context: Context) {
     fun saveHtml(id: String, bytes: ByteArray): Boolean = runCatching {
         require(bytes.isNotEmpty() && bytes.size <= MAX_HTML_BYTES)
         htmlFile(id).writeBytes(bytes)
+        fingerprints.remove(id)
         true
     }.getOrDefault(false)
 

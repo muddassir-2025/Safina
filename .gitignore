@@ -21,3 +21,8 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Release signing material — never commit.
+keystore.properties
+*.jks
+*.keystore

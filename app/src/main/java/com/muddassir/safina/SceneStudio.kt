@@ -14,6 +14,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -76,6 +77,16 @@ import java.util.UUID
 
 enum class StudioTab { Default, Private, Public }
 
+/** A scene drawn natively in Kotlin; shown in the Default tab beside the HTML ones. */
+data class NativeDefault(val sceneId: String, val title: String)
+
+internal val nativeDefaults = listOf(
+    NativeDefault("garden", "Garden"),
+    NativeDefault("winter", "Winter"),
+    NativeDefault("ocean", "Ocean"),
+    NativeDefault("night", "Night")
+)
+
 data class PreviewTarget(
     val id: String,
     val title: String,
@@ -126,6 +137,7 @@ fun SceneStudioHost(
     var moveTarget by remember { mutableStateOf<SavedScene?>(null) }
     var preview by remember { mutableStateOf<PreviewTarget?>(null) }
     var deleteDefaultTarget by remember { mutableStateOf<RemoteDefaultScene?>(null) }
+    var nativePreview by remember { mutableStateOf<NativeDefault?>(null) }
 
     val scenes = remember(libraryVersion, thumbVersion) { store.customScenes() }
     val defaults = remember(scenes) {
@@ -303,8 +315,10 @@ fun SceneStudioHost(
     fun savePublic(scene: PublicScene, collectionId: String?) {
         val token = CloudSession.token
         if (token == null) {
-            CloudSession.signIn(context)
-            toast(context, "Sign in with Google to save scenes")
+            // Saving is local-only without an account; publishing needs one.
+            cachePublicScene(scene, null, store, socket = null)
+            publicRefresh++
+            toast(context, "Saved on this device")
             return
         }
         scope.launch {
@@ -320,18 +334,27 @@ fun SceneStudioHost(
     }
 
     fun unsavePublic(scene: PublicScene) {
-        val token = CloudSession.token ?: return
+        val token = CloudSession.token
+        if (token == null) {
+            // Keep the cached art so the scene still shows in Explore.
+            store.forgetSavedPublic(publicLocalId(scene.id))
+            refresh()
+            publicRefresh++
+            toast(context, "Removed from saved")
+            return
+        }
         scope.launch {
             runCatching { Api.unsaveScene(scene.id, token) }
-            store.removePublicScene(publicLocalId(scene.id))
+            store.forgetSavedPublic(publicLocalId(scene.id))
             refresh()
             publicRefresh++
             toast(context, "Removed from Saved")
         }
     }
 
-    BackHandler(enabled = preview != null || infoOpen || adminLoginOpen || reportsOpen) {
+    BackHandler(enabled = preview != null || nativePreview != null || infoOpen || adminLoginOpen || reportsOpen) {
         when {
+            nativePreview != null -> nativePreview = null
             preview != null -> preview = null
             infoOpen -> infoOpen = false
             adminLoginOpen -> adminLoginOpen = false
@@ -352,6 +375,7 @@ fun SceneStudioHost(
             if (!searching) query = ""
         },
         defaults = defaults,
+        nativeDefaults = nativeDefaults,
         privateScenes = privateScenes,
         savedPublic = savedPublic,
         thumbVersion = thumbVersion,
@@ -364,6 +388,7 @@ fun SceneStudioHost(
         onPreviewDefault = { meta ->
             preview = PreviewTarget(meta.id, meta.name, isDefault = true)
         },
+        onPreviewNative = { nativePreview = it },
         onPreviewPrivate = { meta ->
             preview = PreviewTarget(meta.id, meta.name)
         },
@@ -376,7 +401,7 @@ fun SceneStudioHost(
         onResetDefault = { resetTarget = it },
         onAdminDeleteDefault = { remote -> deleteDefaultTarget = remote },
         onAdminUpdateDefault = { meta ->
-            val token = AdminSession.token
+            val token = AdminSession.authToken
             val serverId = meta.defaultKey
             val html = store.readHtml(meta.id)
             if (token == null || serverId == null || html == null) {
@@ -392,21 +417,72 @@ fun SceneStudioHost(
             }
         },
         onAdminDeleteLocalDefault = { meta ->
-            scope.launch {
-                val token = AdminSession.token ?: return@launch
-                runCatching { Api.adminDeleteDefault(token, meta.defaultKey ?: "") }
-                store.removeCustomScene(meta.id)
+            if (meta.defaultKey != null && BundledScenes.byKey(meta.defaultKey) != null) {
+                store.hideDefaultScene(meta)
                 refresh()
-                toast(context, "Default scene deleted")
+                toast(context, "Removed from Default")
+            } else {
+                scope.launch {
+                    val token = AdminSession.authToken ?: return@launch
+                    runCatching { Api.adminDeleteDefault(token, meta.defaultKey ?: "") }
+                    store.removeCustomScene(meta.id)
+                    refresh()
+                    toast(context, "Default scene deleted")
+                }
             }
         },
         onReport = { reportTarget = it },
         onSavePublic = { scene -> savePublic(scene, null) },
         onUnsavePublic = { unsavePublic(it) },
+        onRemoveOwn = { scene ->
+            val token = CloudSession.token
+            if (token == null) {
+                toast(context, "Sign in to remove a published scene")
+            } else scope.launch {
+                try {
+                    Api.deleteScene(scene.id, token)
+                    store.removePublicScene(publicLocalId(scene.id))
+                    refresh()
+                    publicRefresh++
+                    toast(context, "Removed from public")
+                } catch (e: Exception) {
+                    toast(context, readableError(e))
+                }
+            }
+        },
+        onAdminLock = { scene, locked ->
+            val token = AdminSession.authToken
+            if (token == null) {
+                toast(context, "Admin sign-in required")
+            } else scope.launch {
+                try {
+                    Api.adminLockScene(scene.id, locked, token)
+                    publicRefresh++
+                    toast(context, if (locked) "Scene locked" else "Scene unlocked")
+                } catch (e: Exception) {
+                    toast(context, readableError(e))
+                }
+            }
+        },
+        onAdminBlock = { scene ->
+            val token = AdminSession.authToken
+            val owner = scene.ownerId
+            if (token == null || owner.isNullOrBlank()) {
+                toast(context, "Can't block that author")
+            } else scope.launch {
+                try {
+                    Api.adminBlockUser(owner, true, token)
+                    publicRefresh++
+                    toast(context, "Author blocked")
+                } catch (e: Exception) {
+                    toast(context, readableError(e))
+                }
+            }
+        },
         onMove = { moveTarget = it },
         onAdminDeletePublic = { scene ->
             scope.launch {
-                val token = AdminSession.token ?: return@launch
+                val token = AdminSession.authToken ?: return@launch
                 runCatching { Api.adminDeletePublic(token, scene.id, "Removed by moderator") }
                 store.removePublicScene(publicLocalId(scene.id))
                 refresh()
@@ -452,7 +528,7 @@ fun SceneStudioHost(
                         uploadTarget = null
                     }
                     target == UploadTarget.AdminDefault -> scope.launch {
-                        val token = AdminSession.token ?: return@launch
+                        val token = AdminSession.authToken ?: return@launch
                         runCatching {
                             Api.adminAddDefault(token, title, data.decodeToString(), 100 + defaults.size)
                         }
@@ -461,7 +537,7 @@ fun SceneStudioHost(
                         toast(context, "Added to Default scenes")
                     }
                     target == UploadTarget.AdminPublic -> scope.launch {
-                        val token = AdminSession.token ?: return@launch
+                        val token = AdminSession.authToken ?: return@launch
                         runCatching {
                             Api.adminAddPublic(token, title, data.decodeToString(), null)
                         }
@@ -519,6 +595,9 @@ fun SceneStudioHost(
     }
 
     /* ---------------- preview ---------------- */
+    nativePreview?.let { native ->
+        NativePreviewOverlay(native = native, onDismiss = { nativePreview = null })
+    }
     preview?.let { target ->
         ScenePreviewOverlay(
             target = target,
@@ -583,7 +662,7 @@ fun SceneStudioHost(
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
-                        val token = AdminSession.token ?: return@launch
+                        val token = AdminSession.authToken ?: return@launch
                         runCatching { Api.adminDeleteDefault(token, remote.id) }
                         deleteDefaultTarget = null
                         toast(context, "Default scene deleted")
@@ -654,6 +733,7 @@ fun SceneStudioScreen(
     searching: Boolean,
     onSearch: () -> Unit,
     defaults: List<HtmlSceneMeta>,
+    nativeDefaults: List<NativeDefault>,
     privateScenes: List<HtmlSceneMeta>,
     savedPublic: List<HtmlSceneMeta>,
     thumbVersion: Int,
@@ -664,6 +744,7 @@ fun SceneStudioScreen(
     onUploadPrivate: () -> Unit,
     onUploadAdminPublic: () -> Unit,
     onPreviewDefault: (HtmlSceneMeta) -> Unit,
+    onPreviewNative: (NativeDefault) -> Unit,
     onPreviewPrivate: (HtmlSceneMeta) -> Unit,
     onPreviewPublic: (PublicScene) -> Unit,
     onReplace: (HtmlSceneMeta) -> Unit,
@@ -676,6 +757,9 @@ fun SceneStudioScreen(
     onReport: (PublicScene) -> Unit,
     onSavePublic: (PublicScene) -> Unit,
     onUnsavePublic: (PublicScene) -> Unit,
+    onRemoveOwn: (PublicScene) -> Unit,
+    onAdminLock: (PublicScene, Boolean) -> Unit,
+    onAdminBlock: (PublicScene) -> Unit,
     onMove: (SavedScene) -> Unit,
     onAdminDeletePublic: (PublicScene) -> Unit,
     onAdminReports: () -> Unit,
@@ -688,6 +772,10 @@ fun SceneStudioScreen(
     val needle = query.trim()
     val visibleDefaults = remember(defaults, needle) {
         if (needle.isEmpty()) defaults else defaults.filter { it.name.contains(needle, true) }
+    }
+    val visibleNative = remember(nativeDefaults, needle) {
+        if (needle.isEmpty()) nativeDefaults
+        else nativeDefaults.filter { it.title.contains(needle, true) }
     }
     val visiblePrivate = remember(privateScenes, needle) {
         if (needle.isEmpty()) privateScenes else privateScenes.filter { it.name.contains(needle, true) }
@@ -806,9 +894,12 @@ fun SceneStudioScreen(
                             }
                         }
                     }
-                    if (visibleDefaults.isEmpty()) {
+                    if (visibleDefaults.isEmpty() && visibleNative.isEmpty()) {
                         item { EmptyStudio("No default scenes match your search.") }
                     } else {
+                        items(visibleNative, key = { "native_" + it.sceneId }) { native ->
+                            NativeDefaultCard(native, onClick = { onPreviewNative(native) })
+                        }
                         items(visibleDefaults, key = { it.id }) { meta ->
                             LocalSceneCard(
                                 meta = meta,
@@ -822,7 +913,7 @@ fun SceneStudioScreen(
                                 onRename = { onRename(meta) },
                                 onReset = if (meta.modified) ({ onResetDefault(meta) }) else null,
                                 onDelete = null,
-                                onAdminDelete = if (AdminSession.active && meta.defaultKey != null && BundledScenes.byKey(meta.defaultKey) == null) {
+                                onAdminDelete = if (AdminSession.active && meta.defaultKey != null) {
                                     { onAdminDeleteLocalDefault(meta) }
                                 } else null,
                                 onAdminUpdate = if (AdminSession.active && meta.defaultKey != null && BundledScenes.byKey(meta.defaultKey) == null) {
@@ -879,6 +970,9 @@ fun SceneStudioScreen(
                     onPreview = onPreviewPublic,
                     onSave = onSavePublic,
                     onUnsave = onUnsavePublic,
+                    onRemoveOwn = onRemoveOwn,
+                    onAdminLock = onAdminLock,
+                    onAdminBlock = onAdminBlock,
                     onMove = onMove,
                     onReport = onReport,
                     onAdminDelete = onAdminDeletePublic,
@@ -988,6 +1082,94 @@ private fun EmptyStudio(message: String) {
         Text("Nothing here yet", fontSize = 18.sp, color = SafinaInk, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(8.dp))
         Text(message, fontSize = 12.sp, color = SafinaMuted, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun NativeDefaultCard(native: NativeDefault, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(158.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(SafinaSurface)
+            .border(1.dp, SafinaBorder, RoundedCornerShape(22.dp))
+            .clickable(onClick = onClick)
+    ) {
+        SceneThumb(
+            sceneId = native.sceneId,
+            version = 0,
+            modifier = Modifier.fillMaxSize(),
+            corner = 22.dp
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF0B100C).copy(alpha = 0.12f), Color(0xFF0B100C).copy(alpha = 0.58f))
+                )
+            )
+        )
+        Column(
+            Modifier.fillMaxSize().padding(18.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "DEFAULT",
+                fontSize = 7.5.sp,
+                color = Color(0xFFFDFBF3).copy(alpha = 0.66f),
+                letterSpacing = 2.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                native.title,
+                fontSize = 19.sp,
+                lineHeight = 24.sp,
+                color = Color(0xFFFDFBF3),
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Built-in scene",
+                fontSize = 9.5.sp,
+                color = Color(0xFFFDFBF3).copy(alpha = 0.7f),
+                letterSpacing = 0.6.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun NativePreviewOverlay(native: NativeDefault, onDismiss: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B100C))
+            .clickable(onClick = onDismiss)
+    ) {
+        SceneThumb(
+            sceneId = native.sceneId,
+            version = 0,
+            modifier = Modifier.fillMaxSize(),
+            corner = 0.dp
+        )
+        Column(
+            Modifier.align(Alignment.BottomCenter).padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(native.title, fontSize = 22.sp, color = Color(0xFFFDFBF3), fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap to close",
+                fontSize = 10.sp,
+                color = Color(0xFFFDFBF3).copy(alpha = 0.6f),
+                letterSpacing = 1.sp
+            )
+        }
     }
 }
 
@@ -1153,19 +1335,9 @@ private fun ScenePreviewOverlay(
             if (full?.html != null) {
                 html = full.html
                 withContext(Dispatchers.IO) {
-                    store.upsertSavedPublic(
-                        HtmlSceneMeta(
-                            id = publicLocalId(full.id),
-                            name = full.title,
-                            fileName = "${publicLocalId(full.id)}.html",
-                            addedAt = System.currentTimeMillis(),
-                            source = SCENE_SOURCE_PUBLIC,
-                            remoteId = full.id,
-                            author = full.author,
-                            savedCount = full.savedCount
-                        ),
-                        full.html.toByteArray()
-                    )
+                    // Cache the file for preview only: it must not join the scene
+                    // picker until the user actually saves it.
+                    store.saveHtml(publicLocalId(full.id), full.html.toByteArray())
                 }
             } else failed = true
         } else if (html == null) failed = true
@@ -1239,9 +1411,15 @@ private fun ScenePreviewOverlay(
                         overflow = TextOverflow.Ellipsis
                     )
                     val subtitle = buildString {
-                        target.author?.takeIf { it.isNotBlank() }?.let { append("by $it · ") }
-                        if (target.publicScene != null) append("${target.savedCount} saves · ")
-                        append(if (target.isDefault) "Bundled scene" else "Tap the scene to test it")
+                        target.author?.takeIf { it.isNotBlank() }?.let { append("by $it") }
+                        if (target.publicScene != null) {
+                            if (isNotEmpty()) append(" · ")
+                            append("${target.savedCount} saves")
+                        }
+                        if (target.isDefault) {
+                            if (isNotEmpty()) append(" · ")
+                            append("Bundled scene")
+                        }
                     }
                     Text(subtitle, fontSize = 10.sp, color = Color(0xFF6C756D))
                 }

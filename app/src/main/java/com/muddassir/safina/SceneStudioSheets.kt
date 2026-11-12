@@ -4,6 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -17,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -412,6 +418,169 @@ private fun InfoBullets(items: List<String>) {
 /* Channel name                                                       */
 /* ------------------------------------------------------------------ */
 
+/** The account sheet reachable from the settings menu. */
+@Composable
+fun ProfileSheet(
+    profile: RemoteProfile?,
+    isAdmin: Boolean = false,
+    onOpenAdmin: (() -> Unit)? = null,
+    onEditChannel: () -> Unit,
+    onSignOut: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Sheet(onDismiss) {
+        SheetTitle("Profile", "Your public identity on Safina.")
+        if (isAdmin) {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(SafinaInk)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text("ADMIN", fontSize = 8.sp, color = SafinaOnInk, letterSpacing = 1.6.sp)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "CHANNEL NAME",
+            fontSize = 8.sp,
+            color = SafinaMuted,
+            letterSpacing = 1.6.sp
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            profile?.channelName ?: "Not set",
+            fontSize = 17.sp,
+            color = SafinaInk,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(10.dp))
+        SecondaryButton(
+            if (profile?.channelName == null) "Choose a channel name" else "Change channel name",
+            onEditChannel
+        )
+        Spacer(Modifier.height(18.dp))
+        Text("EMAIL", fontSize = 8.sp, color = SafinaMuted, letterSpacing = 1.6.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(profile?.email ?: "—", fontSize = 15.sp, color = SafinaInk)
+        if (isAdmin && onOpenAdmin != null) {
+            Spacer(Modifier.height(18.dp))
+            SecondaryButton("Admin dashboard", onOpenAdmin)
+        }
+        Spacer(Modifier.height(22.dp))
+        SecondaryButton("Sign out", onSignOut)
+    }
+}
+
+/** Reports, removed scenes and blocked authors — the admin's home base. */
+@Composable
+fun AdminDashboardSheet(onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var data by remember { mutableStateOf<AdminOverview?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var reload by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(reload) {
+        val token = AdminSession.authToken
+        if (token == null) {
+            error = "Admin sign-in required"
+            return@LaunchedEffect
+        }
+        busy = true
+        error = null
+        runCatching { Api.adminDashboard(token) }
+            .onSuccess { data = it }
+            .onFailure { error = it.message ?: "Could not load" }
+        busy = false
+    }
+
+    fun act(block: suspend () -> Unit) {
+        val token = AdminSession.authToken ?: return
+        scope.launch {
+            busy = true
+            runCatching { block() }.onFailure { error = it.message ?: "Failed" }
+            busy = false
+            reload++
+        }
+    }
+
+    Sheet(onDismiss) {
+        SheetTitle("Admin", "Reports, removed scenes and blocked authors.")
+        Spacer(Modifier.height(10.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            if (busy && data == null) {
+                Text("Loading…", fontSize = 12.sp, color = SafinaMuted)
+            }
+            error?.let {
+                Text(it, fontSize = 11.5.sp, color = Color(0xFFB06A5C))
+                Spacer(Modifier.height(8.dp))
+            }
+
+            Text("REPORTS", fontSize = 8.5.sp, color = SafinaMuted, letterSpacing = 2.2.sp)
+            Spacer(Modifier.height(6.dp))
+            val reports = data?.reports.orEmpty()
+            if (reports.isEmpty()) Text("No open reports.", fontSize = 11.5.sp, color = SafinaMuted)
+            reports.take(10).forEach { report ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(report.title, fontSize = 13.sp, color = SafinaInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(report.reasons, fontSize = 10.sp, color = SafinaMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text("${report.reportCount}", fontSize = 12.sp, color = SafinaMuted)
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text("REMOVED SCENES", fontSize = 8.5.sp, color = SafinaMuted, letterSpacing = 2.2.sp)
+            Spacer(Modifier.height(6.dp))
+            val removed = data?.removed.orEmpty()
+            if (removed.isEmpty()) Text("Nothing removed.", fontSize = 11.5.sp, color = SafinaMuted)
+            removed.take(10).forEach { scene ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(scene.title, fontSize = 13.sp, color = SafinaInk, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    SmallAction("Restore", onClick = {
+                        act { Api.adminRestoreScene(scene.id, AdminSession.authToken ?: return@act) }
+                    })
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text("BLOCKED AUTHORS", fontSize = 8.5.sp, color = SafinaMuted, letterSpacing = 2.2.sp)
+            Spacer(Modifier.height(6.dp))
+            val blocked = data?.blocked.orEmpty()
+            if (blocked.isEmpty()) Text("Nobody is blocked.", fontSize = 11.5.sp, color = SafinaMuted)
+            blocked.take(10).forEach { user ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(user.channelName, fontSize = 13.sp, color = SafinaInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        user.email?.let { Text(it, fontSize = 10.sp, color = SafinaMuted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+                    SmallAction("Unblock", onClick = {
+                        act { Api.adminBlockUser(user.userId, false, AdminSession.authToken ?: return@act) }
+                    })
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
 @Composable
 fun ChannelSheet(onDismiss: () -> Unit, onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -522,7 +691,7 @@ fun AdminReportsSheet(onDismiss: () -> Unit) {
     var reload by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(reload) {
-        val token = AdminSession.token
+        val token = AdminSession.authToken
         if (token == null) {
             loading = false
             return@LaunchedEffect
@@ -566,14 +735,14 @@ fun AdminReportsSheet(onDismiss: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SmallAction("Dismiss") {
-                            val token = AdminSession.token ?: return@SmallAction
+                            val token = AdminSession.authToken ?: return@SmallAction
                             scope.launch {
                                 runCatching { Api.adminDismissReports(token, report.sceneId) }
                                 reload++
                             }
                         }
                         SmallAction("Remove scene", danger = true) {
-                            val token = AdminSession.token ?: return@SmallAction
+                            val token = AdminSession.authToken ?: return@SmallAction
                             scope.launch {
                                 runCatching { Api.adminDeletePublic(token, report.sceneId, "Removed by moderator") }
                                 reload++
@@ -729,7 +898,10 @@ private fun PublicSceneCard(
     onPreview: () -> Unit,
     onSave: () -> Unit,
     onUnsave: () -> Unit,
+    onRemoveOwn: () -> Unit,
     onReport: () -> Unit,
+    onAdminLock: (Boolean) -> Unit,
+    onAdminBlock: () -> Unit,
     onAdminDelete: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -769,28 +941,15 @@ private fun PublicSceneCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                "${scene.author.ifBlank { "Unknown" }} · ${scene.savedCount} saves",
+                buildString {
+                    append("${scene.author.ifBlank { "Unknown" }} · ${scene.savedCount} saves")
+                    if (scene.locked) append(" · Locked")
+                },
                 fontSize = 9.5.sp,
                 color = Color(0xFFFDFBF3).copy(alpha = 0.75f)
             )
         }
         Row(Modifier.align(Alignment.TopEnd).padding(10.dp)) {
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(Color(0xFF0B100C).copy(alpha = 0.38f))
-                    .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(11.dp))
-                    .clickable(enabled = signedIn) { if (saved) onUnsave() else onSave() }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    if (saved) "Saved" else "Save",
-                    fontSize = 10.5.sp,
-                    color = Color(0xFFFDFBF3),
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            Spacer(Modifier.width(6.dp))
             Box(
                 Modifier
                     .size(30.dp)
@@ -801,14 +960,39 @@ private fun PublicSceneCard(
                 contentAlignment = Alignment.Center
             ) { MoreGlyph(Color(0xFFFDFBF3), 16.dp) }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = SafinaSurface) {
+                if (scene.isOwn) {
+                    DropdownMenuItem(
+                        text = { Text("Remove from public", fontSize = 13.sp) },
+                        onClick = { menuOpen = false; onRemoveOwn() }
+                    )
+                } else {
+                    DropdownMenuItem(
+                        text = { Text(if (saved) "Remove from saved" else "Save", fontSize = 13.sp) },
+                        onClick = { menuOpen = false; if (saved) onUnsave() else onSave() }
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("Preview", fontSize = 13.sp) },
                     onClick = { menuOpen = false; onPreview() }
                 )
-                DropdownMenuItem(
-                    text = { Text("Report", fontSize = 13.sp) },
-                    onClick = { menuOpen = false; onReport() }
-                )
+                if (!scene.isOwn) {
+                    DropdownMenuItem(
+                        text = { Text("Report", fontSize = 13.sp) },
+                        onClick = { menuOpen = false; onReport() }
+                    )
+                }
+                if (admin) {
+                    DropdownMenuItem(
+                        text = { Text(if (scene.locked) "Unlock scene" else "Lock scene", fontSize = 13.sp) },
+                        onClick = { menuOpen = false; onAdminLock(!scene.locked) }
+                    )
+                    if (!scene.isOwn && !scene.ownerId.isNullOrBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("Block author", fontSize = 13.sp, color = Color(0xFFB06A5C)) },
+                            onClick = { menuOpen = false; onAdminBlock() }
+                        )
+                    }
+                }
                 if (admin) {
                     DropdownMenuItem(
                         text = { Text("Admin delete", fontSize = 13.sp, color = Color(0xFFB06A5C)) },
@@ -841,6 +1025,9 @@ fun PublicTab(
     onPreview: (PublicScene) -> Unit,
     onSave: (PublicScene) -> Unit,
     onUnsave: (PublicScene) -> Unit,
+    onRemoveOwn: (PublicScene) -> Unit,
+    onAdminLock: (PublicScene, Boolean) -> Unit,
+    onAdminBlock: (PublicScene) -> Unit,
     onMove: (SavedScene) -> Unit,
     onReport: (PublicScene) -> Unit,
     onAdminDelete: (PublicScene) -> Unit,
@@ -849,8 +1036,6 @@ fun PublicTab(
 ) {
     val scope = rememberCoroutineScope()
     var saves by remember { mutableStateOf<List<SavedScene>>(emptyList()) }
-    var collections by remember { mutableStateOf<List<CollectionInfo>>(emptyList()) }
-    var filter by remember { mutableStateOf("all") }
     var explore by remember { mutableStateOf<List<PublicScene>>(emptyList()) }
     var page by remember { mutableIntStateOf(1) }
     var hasMore by remember { mutableStateOf(false) }
@@ -859,23 +1044,22 @@ fun PublicTab(
     var loadingExplore by remember { mutableStateOf(true) }
     var exploreFailed by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
+    var filterOpen by remember { mutableStateOf(false) }
 
-    val token = CloudSession.token
-
-    LaunchedEffect(refreshKey, signedIn, filter) {
+    LaunchedEffect(refreshKey, signedIn) {
         if (!signedIn) {
             saves = emptyList()
-            collections = emptyList()
             return@LaunchedEffect
         }
         val auth = CloudSession.token ?: return@LaunchedEffect
         loadingSaved = true
         saves = runCatching { Api.mySaves(auth) }.getOrDefault(emptyList())
-        collections = runCatching { Api.collections(auth) }.getOrDefault(emptyList())
         loadingSaved = false
     }
 
-    LaunchedEffect(refreshKey, sortTop, query, reload) {
+    LaunchedEffect(refreshKey, sortTop, reload) {
         loadingExplore = true
         exploreFailed = false
         page = 1
@@ -884,7 +1068,7 @@ fun PublicTab(
                 token = CloudSession.token,
                 page = 1,
                 sort = if (sortTop) "top" else "new",
-                query = query.trim(),
+                query = "",
                 excludeSaved = false
             )
         }
@@ -904,7 +1088,7 @@ fun PublicTab(
         val next = page + 1
         scope.launch {
             val result = runCatching {
-                Api.listPublic(CloudSession.token, next, if (sortTop) "top" else "new", query.trim(), false)
+                Api.listPublic(CloudSession.token, next, if (sortTop) "top" else "new", "", false)
             }
             result.getOrNull()?.let { (items, more) ->
                 explore = explore + items
@@ -914,93 +1098,61 @@ fun PublicTab(
         }
     }
 
-    val visibleSaves = when (filter) {
-        "all" -> saves
-        "uncat" -> saves.filter { it.collectionId == null }
-        else -> saves.filter { it.collectionId == filter }
+    val savedCards: List<PublicScene> = if (signedIn) {
+        saves.filter { !it.removed }.map { it.scene }
+    } else {
+        savedLocal.map { meta ->
+            PublicScene(
+                id = meta.remoteId ?: meta.id.removePrefix("pub_"),
+                title = meta.name,
+                author = meta.author ?: "",
+                savedCount = meta.savedCount ?: 0
+            )
+        }
     }
-    val lowerQuery = query.trim().lowercase()
-    val exploreVisible = if (lowerQuery.isEmpty()) explore
-    else explore.filter { it.title.lowercase().contains(lowerQuery) || it.author.lowercase().contains(lowerQuery) }
+
+    val needle = (if (searchText.isNotBlank()) searchText else query).trim().lowercase()
+    val exploreVisible = if (needle.isEmpty()) explore
+    else explore.filter {
+        it.title.lowercase().contains(needle) || it.author.lowercase().contains(needle)
+    }
 
     LazyColumn(
         modifier,
-        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 28.dp)
     ) {
         item {
-            SectionLabel(if (signedIn) "SAVED" else "SAVED · SIGN IN TO SAVE")
+            SectionLabel(if (signedIn) "SAVED" else "SAVED ON THIS DEVICE")
         }
 
-        if (!signedIn) {
-            item {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(SafinaField)
-                        .border(1.dp, SafinaBorder, RoundedCornerShape(18.dp))
-                        .padding(16.dp)
-                ) {
-                    Text("Browse freely. Sign in to save scenes.", fontSize = 12.sp, color = SafinaMuted)
-                    Spacer(Modifier.height(10.dp))
-                    SecondaryButton("Sign in with Google", onRequestSignIn)
+        item {
+            when {
+                loadingSaved -> {
+                    Text("Loading saved scenes…", fontSize = 11.5.sp, color = SafinaMuted)
                 }
-            }
-        } else {
-            item {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilterChip("All", filter == "all") { filter = "all" }
-                    FilterChip("Uncategorized", filter == "uncat") { filter = "uncat" }
-                    collections.take(2).forEach { collection ->
-                        FilterChip(collection.name, filter == collection.id) { filter = collection.id ?: "all" }
-                    }
+                savedCards.isEmpty() -> {
+                    Text(
+                        if (signedIn) "Nothing saved yet."
+                        else "Tap the bookmark on any scene to keep it here. No account needed.",
+                        fontSize = 11.5.sp,
+                        color = SafinaMuted
+                    )
                 }
-            }
-            if (loadingSaved) {
-                item { Text("Loading saved scenes…", fontSize = 11.5.sp, color = SafinaMuted) }
-            } else if (visibleSaves.isEmpty()) {
-                item { Text("Nothing saved here yet.", fontSize = 11.5.sp, color = SafinaMuted) }
-            } else {
-                items(visibleSaves, key = { "s-${it.scene.id}" }) { saved ->
-                    if (saved.removed) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(SafinaField)
-                                .border(1.dp, SafinaBorder, RoundedCornerShape(16.dp))
-                                .padding(14.dp)
-                                .combinedClickable(onClick = { onMove(saved) }, onLongClick = { onMove(saved) }),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "This scene was removed",
-                                fontSize = 12.sp,
-                                color = SafinaMuted,
-                                modifier = Modifier.weight(1f)
+                else -> {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(savedCards, key = { "sv-${it.id}" }) { scene ->
+                            CompactSceneCard(
+                                scene = scene,
+                                thumbVersion = thumbVersion,
+                                admin = admin,
+                                onPreview = { onPreview(scene) },
+                                onRemoveSaved = { onUnsave(scene) },
+                                onRemovePublic = if (scene.isOwn) {
+                                    { onRemoveOwn(scene) }
+                                } else null,
+                                onLock = { locked -> onAdminLock(scene, locked) },
+                                onAdminDelete = { onAdminDelete(scene) }
                             )
-                            Text("Move", fontSize = 11.sp, color = SafinaAccent)
-                        }
-                    } else {
-                        PublicSceneCard(
-                            scene = saved.scene,
-                            thumbVersion = thumbVersion,
-                            signedIn = signedIn,
-                            admin = admin,
-                            saved = true,
-                            onPreview = { onPreview(saved.scene) },
-                            onSave = { onSave(saved.scene) },
-                            onUnsave = { onUnsave(saved.scene) },
-                            onReport = { onReport(saved.scene) },
-                            onAdminDelete = { onAdminDelete(saved.scene) }
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            SmallAction("Move to…") { onMove(saved) }
                         }
                     }
                 }
@@ -1008,25 +1160,53 @@ fun PublicTab(
         }
 
         item {
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("EXPLORE", if (admin) "ADMIN" else null)
-            }
             Row(
-                Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                FilterChip("Most saved", sortTop) { sortTop = true }
-                FilterChip("Newest", !sortTop) { sortTop = false }
+                Text(
+                    "EXPLORE",
+                    fontSize = 8.5.sp,
+                    color = SafinaMuted,
+                    letterSpacing = 2.5.sp,
+                    modifier = Modifier.weight(1f)
+                )
                 if (admin) {
-                    Spacer(Modifier.width(2.dp))
-                    SmallAction("Reports") { onAdminReports() }
+                    SmallAction("Reports", onClick = onAdminReports)
+                    Spacer(Modifier.width(8.dp))
                 }
+                GlyphButton(onClick = { searchOpen = !searchOpen }) { SearchGlyph() }
+                Spacer(Modifier.width(8.dp))
+                Box {
+                    GlyphButton(onClick = { filterOpen = true }) { FilterGlyph() }
+                    DropdownMenu(
+                        expanded = filterOpen,
+                        onDismissRequest = { filterOpen = false },
+                        containerColor = SafinaSurface
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Newest", fontSize = 13.sp) },
+                            onClick = { filterOpen = false; sortTop = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Most saved", fontSize = 13.sp) },
+                            onClick = { filterOpen = false; sortTop = true }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (searchOpen) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                Field(searchText, "Search by title or user", { searchText = it.take(40) })
             }
         }
 
         if (loadingExplore) {
             item {
-                Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalArrangement = Arrangement.Center) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.Center) {
                     CircularProgressIndicator(color = SafinaAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 }
             }
@@ -1035,6 +1215,7 @@ fun PublicTab(
                 Column(
                     Modifier
                         .fillMaxWidth()
+                        .padding(top = 12.dp)
                         .clip(RoundedCornerShape(18.dp))
                         .background(SafinaField)
                         .padding(16.dp)
@@ -1045,31 +1226,172 @@ fun PublicTab(
                 }
             }
         } else if (exploreVisible.isEmpty()) {
-            item { Text("No public scenes match your search.", fontSize = 11.5.sp, color = SafinaMuted) }
+            item {
+                Text(
+                    if (needle.isEmpty()) "No public scenes yet." else "Nothing matches \"$needle\".",
+                    fontSize = 11.5.sp,
+                    color = SafinaMuted,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+            }
         } else {
             items(exploreVisible, key = { "e-${it.id}" }) { scene ->
+                Spacer(Modifier.height(10.dp))
                 PublicSceneCard(
                     scene = scene,
                     thumbVersion = thumbVersion,
                     signedIn = signedIn,
                     admin = admin,
-                    saved = scene.isSaved || saves.any { it.scene.id == scene.id },
+                    // Signed in, the server's saves are the truth; the local cache also
+                    // holds scenes that were only previewed.
+                    saved = scene.isSaved || if (signedIn) {
+                        saves.any { it.scene.id == scene.id }
+                    } else {
+                        savedLocal.any { it.remoteId == scene.id }
+                    },
                     onPreview = { onPreview(scene) },
-                    onSave = {
-                        if (!signedIn) onRequestSignIn() else onSave(scene)
-                    },
+                    onSave = { onSave(scene) },
                     onUnsave = { onUnsave(scene) },
-                    onReport = {
-                        if (!signedIn) onRequestSignIn() else onReport(scene)
-                    },
+                    onRemoveOwn = { onRemoveOwn(scene) },
+                    onReport = { if (!signedIn) onRequestSignIn() else onReport(scene) },
+                    onAdminLock = { locked -> onAdminLock(scene, locked) },
+                    onAdminBlock = { onAdminBlock(scene) },
                     onAdminDelete = { onAdminDelete(scene) }
                 )
             }
             if (hasMore) {
                 item {
+                    Spacer(Modifier.height(10.dp))
                     SecondaryButton("Load more") { loadMore() }
                 }
             }
+        }
+    }
+}
+
+/** Small vertical card used in the saved strip. */
+@Composable
+private fun CompactSceneCard(
+    scene: PublicScene,
+    thumbVersion: Int,
+    admin: Boolean,
+    onPreview: () -> Unit,
+    onRemoveSaved: () -> Unit,
+    onRemovePublic: (() -> Unit)?,
+    onLock: (Boolean) -> Unit,
+    onAdminDelete: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .width(112.dp)
+            .height(150.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(SafinaSurface)
+            .border(1.dp, SafinaBorder, RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = onPreview, onLongClick = onPreview)
+    ) {
+        SceneThumb(
+            sceneId = "$HTML_SCENE_PREFIX${sceneLocalId(scene.id)}",
+            version = thumbVersion,
+            modifier = Modifier.fillMaxSize(),
+            corner = 16.dp
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, Color(0xFF0B100C).copy(alpha = 0.74f))
+                )
+            )
+        )
+        Text(
+            scene.title,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            color = Color(0xFFFDFBF3),
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.BottomStart).padding(9.dp)
+        )
+        Box(Modifier.align(Alignment.TopEnd).padding(5.dp)) {
+            GlyphButton(size = 26.dp, onClick = { menuOpen = true }) {
+                MoreGlyph(Color(0xFFFDFBF3), 13.dp)
+            }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                containerColor = SafinaSurface
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Preview", fontSize = 13.sp) },
+                    onClick = { menuOpen = false; onPreview() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Remove from saved", fontSize = 13.sp) },
+                    onClick = { menuOpen = false; onRemoveSaved() }
+                )
+                onRemovePublic?.let { remove ->
+                    DropdownMenuItem(
+                        text = { Text("Remove from public", fontSize = 13.sp, color = Color(0xFFB06A5C)) },
+                        onClick = { menuOpen = false; remove() }
+                    )
+                }
+                if (admin) {
+                    DropdownMenuItem(
+                        text = { Text(if (scene.locked) "Unlock scene" else "Lock scene", fontSize = 13.sp) },
+                        onClick = { menuOpen = false; onLock(!scene.locked) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Admin delete", fontSize = 13.sp, color = Color(0xFFB06A5C)) },
+                        onClick = { menuOpen = false; onAdminDelete() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlyphButton(size: Dp = 32.dp, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(SafinaField)
+            .border(1.dp, SafinaBorder, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { content() }
+}
+
+@Composable
+private fun SearchGlyph() {
+    Canvas(Modifier.size(14.dp)) {
+        val stroke = 1.6.dp.toPx()
+        drawCircle(Color(0xFF3D453E), radius = size.minDimension * 0.32f, center = center.copy(y = center.y - size.minDimension * 0.08f), style = Stroke(stroke))
+        drawLine(
+            Color(0xFF3D453E),
+            start = Offset(size.width * 0.62f, size.height * 0.62f),
+            end = Offset(size.width * 0.9f, size.height * 0.9f),
+            strokeWidth = stroke
+        )
+    }
+}
+
+@Composable
+private fun FilterGlyph() {
+    Canvas(Modifier.size(14.dp)) {
+        val stroke = 1.6.dp.toPx()
+        val start = size.width * 0.1f
+        listOf(0.22f, 0.5f, 0.78f).forEachIndexed { index, y ->
+            val shrink = index * size.width * 0.14f
+            drawLine(
+                Color(0xFF3D453E),
+                start = Offset(start + shrink, size.height * y),
+                end = Offset(size.width - start - shrink, size.height * y),
+                strokeWidth = stroke
+            )
         }
     }
 }

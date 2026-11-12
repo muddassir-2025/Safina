@@ -8,6 +8,20 @@
       "when": 1794424319968,
       "tag": "0000_perpetual_johnny_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794433031865,
+      "tag": "0001_unknown_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794434223758,
+      "tag": "0002_cooing_starjammers",
+      "breakpoints": true
     }
   ]
 }

@@ -18,6 +18,8 @@ export const profiles = pgTable("profiles", {
   userId: text("user_id").primaryKey(),
   email: text("email"),
   channelName: text("channel_name").notNull().unique(),
+  /** Moderated: a blocked author's scenes leave the public list. */
+  blocked: boolean("blocked").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -37,6 +39,8 @@ export const publicScenes = pgTable(
     authorLabel: text("author_label"),
     isOfficial: boolean("is_official").notNull().default(false),
     isRemoved: boolean("is_removed").notNull().default(false),
+    /** Moderated: the author can no longer delete or replace it. */
+    locked: boolean("locked").notNull().default(false),
     removedBy: text("removed_by"),
     removedReason: text("removed_reason"),
     removedAt: timestamp("removed_at", { withTimezone: true }),

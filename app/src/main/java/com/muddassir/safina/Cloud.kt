@@ -29,7 +29,12 @@ class ApiException(
     val code: String? = null
 ) : Exception(message)
 
-data class RemoteProfile(val userId: String, val email: String?, val channelName: String?)
+data class RemoteProfile(
+    val userId: String,
+    val email: String?,
+    val channelName: String?,
+    val isAdmin: Boolean = false
+)
 
 data class PublicScene(
     val id: String,
@@ -41,12 +46,24 @@ data class PublicScene(
     val isSaved: Boolean = false,
     val isOwn: Boolean = false,
     val removed: Boolean = false,
+    val locked: Boolean = false,
+    val ownerId: String? = null,
     val html: String? = null
 )
 
 data class CollectionInfo(val id: String?, val name: String, val count: Int = 0)
 
 data class SavedScene(val scene: PublicScene, val collectionId: String?, val removed: Boolean)
+
+data class AdminRemovedScene(val id: String, val title: String)
+
+data class AdminBlockedUser(val userId: String, val channelName: String, val email: String?)
+
+data class AdminOverview(
+    val removed: List<AdminRemovedScene>,
+    val blocked: List<AdminBlockedUser>,
+    val reports: List<ReportedScene>
+)
 
 data class RemoteDefaultScene(
     val id: String,
@@ -153,7 +170,8 @@ object Api {
         RemoteProfile(
             userId = user?.optString("id").orEmpty(),
             email = user?.optString("email")?.ifBlank { null },
-            channelName = profile?.optString("channelName")?.ifBlank { null }
+            channelName = profile?.optString("channelName")?.ifBlank { null },
+            isAdmin = root.optBoolean("isAdmin", false)
         )
     }
 
@@ -361,11 +379,65 @@ object Api {
         Unit
     }
 
+    suspend fun adminLockScene(id: String, locked: Boolean, token: String): Unit = withColdStartRetry {
+        obj(
+            "POST",
+            "/admin/public-scenes/${Uri.encode(id)}/lock",
+            admin = token,
+            body = JSONObject().put("locked", locked)
+        )
+        Unit
+    }
+
     suspend fun adminDeletePublic(token: String, id: String, reason: String?): Unit = withColdStartRetry {
         obj(
             "DELETE", "/admin/public-scenes/${Uri.encode(id)}", admin = token,
             body = JSONObject().put("reason", reason ?: "Removed by moderator")
         )
+        Unit
+    }
+
+    suspend fun adminDashboard(token: String): AdminOverview = withColdStartRetry {
+        val root = obj("GET", "/admin/dashboard", admin = token)
+            ?: throw ApiException(0, "Empty response")
+        val removedArr = root.optJSONArray("removed") ?: JSONArray()
+        val blockedArr = root.optJSONArray("blocked") ?: JSONArray()
+        val reportsArr = root.optJSONArray("reports") ?: JSONArray()
+        AdminOverview(
+            removed = (0 until removedArr.length()).map { i ->
+                val o = removedArr.getJSONObject(i)
+                AdminRemovedScene(o.optString("id"), o.optString("title"))
+            },
+            blocked = (0 until blockedArr.length()).map { i ->
+                val o = blockedArr.getJSONObject(i)
+                AdminBlockedUser(
+                    o.optString("userId"),
+                    o.optString("channelName"),
+                    o.optString("email").ifBlank { null }
+                )
+            },
+            reports = (0 until reportsArr.length()).map { i ->
+                val o = reportsArr.getJSONObject(i)
+                ReportedScene(
+                    o.optString("sceneId"), o.optString("title"), "",
+                    o.optInt("reportCount"), o.optString("reasons"), 0L
+                )
+            }
+        )
+    }
+
+    suspend fun adminBlockUser(userId: String, blocked: Boolean, token: String): Unit = withColdStartRetry {
+        obj(
+            "POST",
+            "/admin/users/${Uri.encode(userId)}/block",
+            admin = token,
+            body = JSONObject().put("blocked", blocked)
+        )
+        Unit
+    }
+
+    suspend fun adminRestoreScene(id: String, token: String): Unit = withColdStartRetry {
+        obj("POST", "/admin/public-scenes/${Uri.encode(id)}/restore", admin = token)
         Unit
     }
 
@@ -396,6 +468,8 @@ object Api {
         isSaved = o.optBoolean("isSaved", false),
         isOwn = o.optBoolean("isOwn", false),
         removed = o.optBoolean("removed", false),
+        locked = o.optBoolean("locked", false),
+        ownerId = o.optString("ownerId").ifBlank { null },
         html = o.optString("html").ifBlank { null }
     )
 }
@@ -438,6 +512,8 @@ object CloudSession {
     }
 
     val signedIn: Boolean get() = token != null
+
+    val isAdmin: Boolean get() = profile?.isAdmin == true
 
     fun signIn(context: Context) {
         val url = "${Api.baseUrl}/auth/google/start?redirect=${Uri.encode(BuildConfig.AUTH_REDIRECT)}"
@@ -490,7 +566,14 @@ object AdminSession {
     var expiresAt by mutableStateOf(0L)
         private set
 
-    val active: Boolean get() = token != null && System.currentTimeMillis() < expiresAt
+    /** A Google account whose email is ADMIN_EMAIL is an admin without a password login. */
+    val active: Boolean
+        get() = (token != null && System.currentTimeMillis() < expiresAt) || CloudSession.isAdmin
+
+    /** Token to send on /admin routes: the admin JWT, else the admin user's JWT. */
+    val authToken: String?
+        get() = if (token != null && System.currentTimeMillis() < expiresAt) token
+        else CloudSession.token.takeIf { CloudSession.isAdmin }
 
     fun setToken(value: String, expires: Long, adminEmail: String) {
         token = value

@@ -1,0 +1,1 @@
+ALTER TABLE "public_scenes" ADD COLUMN "locked" boolean DEFAULT false NOT NULL;

@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -118,6 +119,13 @@ fun AppBackdrop(
 ) {
     Box(modifier.fillMaxSize()) {
         val palette = LocalSafinaPalette.current
+        // The glow tints are picked per theme, otherwise they wash out dark mode.
+        val dark = palette.backdropTop.luminance() < 0.35f
+        val glowA = if (dark) Color(0xFF31452F).copy(alpha = 0.55f)
+        else Color(0xFFBFD8C4).copy(alpha = 0.42f)
+        val glowB = if (dark) Color(0xFF23303C).copy(alpha = 0.55f)
+        else Color(0xFFC6D8E8).copy(alpha = 0.45f)
+        val mote = if (dark) Color(0xFFC8D8CB) else Color.White
         Canvas(Modifier.fillMaxSize()) {
             drawRect(
                 Brush.verticalGradient(
@@ -127,7 +135,7 @@ fun AppBackdrop(
             val drift = sin(time * TWO_PI * 0.25f)
             drawCircle(
                 Brush.radialGradient(
-                    listOf(Color(0xFFBFD8C4).copy(alpha = 0.42f), Color.Transparent),
+                    listOf(glowA, Color.Transparent),
                     center = Offset(size.width * (0.18f + drift * 0.05f), size.height * 0.16f),
                     radius = size.width * 0.75f
                 ),
@@ -136,7 +144,7 @@ fun AppBackdrop(
             )
             drawCircle(
                 Brush.radialGradient(
-                    listOf(Color(0xFFC6D8E8).copy(alpha = 0.45f), Color.Transparent),
+                    listOf(glowB, Color.Transparent),
                     center = Offset(size.width * (0.88f - drift * 0.04f), size.height * 0.72f),
                     radius = size.width * 0.8f
                 ),
@@ -148,8 +156,8 @@ fun AppBackdrop(
                 val x = ((i * 0.173f) % 1f) * size.width +
                     sin((time + i) * TWO_PI * 0.5f) * size.width * 0.015f
                 val y = size.height * (1.05f - phase * 1.1f)
-                val a = (1f - phase) * 0.16f
-                drawCircle(Color.White.copy(alpha = a), size.width * 0.0022f, Offset(x, y))
+                val a = (1f - phase) * if (dark) 0.09f else 0.16f
+                drawCircle(mote.copy(alpha = a), size.width * 0.0022f, Offset(x, y))
             }
         }
         content()
@@ -399,7 +407,12 @@ data class SettingsActions(
     val onToggleVibration: () -> Unit,
     val onToggleDarkMode: () -> Unit,
     val onStudio: () -> Unit,
-    val onHome: (() -> Unit)? = null
+    val onHome: (() -> Unit)? = null,
+    val signedIn: Boolean = false,
+    val identity: String? = null,
+    val onSignIn: () -> Unit = {},
+    val onProfile: () -> Unit = {},
+    val onSignOut: () -> Unit = {}
 )
 
 /**
@@ -472,7 +485,25 @@ fun SettingsMenu(
                             .height(1.dp)
                             .background(SafinaInk.copy(alpha = 0.07f))
                     )
-                    ActionRow("Create a scene") {
+                    if (actions.signedIn) {
+                        ActionRow(actions.identity?.let { "Profile · $it" } ?: "Profile") {
+                            open = false
+                            actions.onProfile()
+                        }
+                    } else {
+                        ActionRow("Sign in") {
+                            open = false
+                            actions.onSignIn()
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .padding(horizontal = 18.dp, vertical = 6.dp)
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(SafinaInk.copy(alpha = 0.07f))
+                    )
+                    ActionRow("Scene studio") {
                         open = false
                         actions.onStudio()
                     }

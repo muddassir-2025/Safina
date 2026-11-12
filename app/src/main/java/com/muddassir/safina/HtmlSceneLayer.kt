@@ -2,6 +2,8 @@ package com.muddassir.safina
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
@@ -13,6 +15,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.util.Base64
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -32,6 +35,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 import org.json.JSONTokener
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 
 private const val SCENE_BASE_URL = "https://scenes.local/"
@@ -158,9 +162,12 @@ fun HtmlSceneLayer(
     onDarkScene: (Boolean) -> Unit = {},
     onReady: () -> Unit = {},
     onError: () -> Unit = {},
-    onSnapshot: (String) -> Unit = {}
+    onSnapshot: (String) -> Unit = {},
+    /** Renders the page into a bitmap itself, for scenes that draw without a <canvas>. */
+    captureFrame: Boolean = false
 ) {
     val ready = remember { mutableStateOf(false) }
+    val loaded = remember { mutableStateOf(false) }
     val initialized = remember { mutableStateOf(false) }
     val webRef = remember { mutableStateOf<WebView?>(null) }
     val fade = remember { Animatable(0f) }
@@ -191,6 +198,20 @@ fun HtmlSceneLayer(
             view.evaluateJavascript(
                 "window.zikrScene&&window.zikrScene.setProgress(${jsFloat(progress)})", null
             )
+        }
+    }
+
+    // Draw the page into a bitmap. This works for CSS/SVG-only scenes, which the
+    // canvas-based snapshot below cannot capture.
+    LaunchedEffect(loaded.value, captureFrame) {
+        if (!loaded.value || !captureFrame) return@LaunchedEffect
+        val view = webRef.value ?: return@LaunchedEffect
+        delay(1_500)
+        if (snapshotSent.value) return@LaunchedEffect
+        val url = captureView(view)
+        if (url != null) {
+            snapshotSent.value = true
+            onSnapshot(url)
         }
     }
 
@@ -255,7 +276,9 @@ fun HtmlSceneLayer(
                     main = main,
                     ready = ready,
                     onDarkScene = onDarkScene,
-                    onError = onError
+                    onError = onError,
+                    captureFrame = captureFrame,
+                    onLoaded = { main.post { loaded.value = true } }
                 ).also { webRef.value = it }
             },
             update = { webRef.value = it },
@@ -273,7 +296,9 @@ private fun createSceneWebView(
     main: Handler,
     ready: MutableState<Boolean>,
     onDarkScene: (Boolean) -> Unit,
-    onError: () -> Unit
+    onError: () -> Unit,
+    captureFrame: Boolean = false,
+    onLoaded: () -> Unit = {}
 ): WebView {
     val bridge = HostBridge(
         onReady = { main.post { ready.value = true } },
@@ -283,6 +308,7 @@ private fun createSceneWebView(
     val html = withContentSecurityPolicy(rawHtml)
 
     return PassiveWebView(context).apply {
+        if (captureFrame) setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         setBackgroundColor(android.graphics.Color.TRANSPARENT)
         isFocusable = false
         isFocusableInTouchMode = false
@@ -332,6 +358,10 @@ private fun createSceneWebView(
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
 
+            override fun onPageFinished(view: WebView, url: String?) {
+                onLoaded()
+            }
+
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 onError()
                 return true
@@ -341,3 +371,19 @@ private fun createSceneWebView(
         loadDataWithBaseURL(SCENE_BASE_URL, html, "text/html", "utf-8", null)
     }
 }
+
+/** Draws a laid-out WebView into a small PNG data URL. */
+private fun captureView(view: WebView): String? = runCatching {
+    if (view.width <= 0 || view.height <= 0) return null
+    val full = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+    view.draw(Canvas(full))
+    val width = 360
+    val height = maxOf(1, (width * full.height.toFloat() / full.width).toInt())
+    val scaled = Bitmap.createScaledBitmap(full, width, height, true)
+    val bytes = ByteArrayOutputStream()
+    scaled.compress(Bitmap.CompressFormat.PNG, 90, bytes)
+    if (scaled !== full) scaled.recycle()
+    full.recycle()
+    if (bytes.size() < 400) null
+    else "data:image/png;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)
+}.getOrNull()

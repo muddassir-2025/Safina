@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -88,6 +89,7 @@ fun SceneThumb(
         }
     }
 }
+
 
 @Composable
 private fun NativeSceneThumb(sceneId: String) {
@@ -165,27 +167,31 @@ fun ThumbnailHarvester(
         }
     }
 
-    Box(
-        Modifier
-            .offset(x = 0.dp, y = 0.dp)
-            .alpha(0f)
-            .size(300.dp, 460.dp)
-    ) {
-        HtmlSceneLayer(
-            html = document,
-            progress = 0.3f,
-            tapSignal = 0,
-            tapX = 0.5f,
-            tapY = 0.65f,
-            paused = false,
-            onSnapshot = { url ->
-                if (!handled) {
-                    handled = true
-                    decodePngDataUrl(url)?.let { store.saveThumbnail(meta.id, it) }
-                    onCaptured()
-                    cursor++
+    // A new WebView per scene: AndroidView keeps its first document otherwise.
+    key(meta.id) {
+        Box(
+            Modifier
+                .offset(x = 0.dp, y = 0.dp)
+                .alpha(0f)
+                .size(300.dp, 460.dp)
+        ) {
+            HtmlSceneLayer(
+                html = document,
+                progress = 0.3f,
+                tapSignal = 0,
+                tapX = 0.5f,
+                tapY = 0.65f,
+                paused = false,
+                captureFrame = true,
+                onSnapshot = { url ->
+                    if (!handled) {
+                        handled = true
+                        decodePngDataUrl(url)?.let { store.saveThumbnail(meta.id, it) }
+                        onCaptured()
+                        cursor++
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 }

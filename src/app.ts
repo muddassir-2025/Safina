@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import bcrypt from "bcryptjs";
-import { and, asc, count, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { config, MAX_TITLE_LENGTH } from "./config.js";
 import { db } from "./db/client.js";
@@ -106,7 +106,9 @@ function sceneJson(
     createdAt: row.createdAt.getTime(),
     isSaved: viewer.savedIds ? viewer.savedIds.has(row.id) : false,
     isOwn: viewer.userId ? row.ownerId === viewer.userId : false,
+    ownerId: row.isOfficial ? null : row.ownerId,
     removed: row.isRemoved,
+    locked: row.locked,
     ...(viewer.html ? { html: viewer.html } : {}),
   };
 }
@@ -177,8 +179,11 @@ app.get("/health", async (c) => {
 app.get("/auth/me", async (c) => {
   const user = await requireUser(c);
   const profile = await ensureProfile(user);
+  const isAdmin =
+    (user.email ?? "").toLowerCase() === config().ADMIN_EMAIL.toLowerCase();
   return c.json({
     user: { id: user.userId, email: user.email },
+    isAdmin,
     profile: profile
       ? {
           userId: profile.userId,
@@ -277,24 +282,90 @@ app.get("/auth/callback", (c) => {
   const authBase = cfg.NEON_AUTH_BASE_URL.replace(/\/$/, "");
   const redirect = c.req.query("redirect") || "safina://auth";
   if (!/^safina:\/\/auth/.test(redirect)) throw new HttpError(400, "Invalid redirect");
+  // Names only — never log token/hash values.
+  const params = Object.keys(c.req.query());
+  console.log("auth callback params", JSON.stringify(params));
   const html = `<!doctype html><meta charset="utf-8"><title>Finishing sign-in…</title>
 <body style="font-family:system-ui;padding:2rem">
 <p>Finishing sign-in…</p>
+<p id="detail" style="color:#777;font-size:13px"></p>
 <script>
 (async () => {
+  const qs = new URLSearchParams(location.search);
+  const detail = document.getElementById("detail");
+  function fail(message) {
+    const providerError = qs.get("error_description") || qs.get("error") || "";
+    document.querySelector("p").textContent = message;
+    detail.textContent = providerError ? "Google said: " + providerError : "";
+    const reason = encodeURIComponent(message + (providerError ? " — " + providerError : ""));
+    fetch(${JSON.stringify("/auth/report")}, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({ reason, params: [...qs.keys()] })
+    }).catch(() => {});
+  }
   try {
+    let token = null;
+    let exchanged = null;
+    // OAuth returns a verifier that has to be exchanged for a session first
+    // (this is what neon-js does before it reads /token).
+    const verifier = qs.get("neon_auth_session_verifier");
+    if (verifier) {
+      const exchange = await fetch(
+        ${JSON.stringify(authBase + "/get-session?neon_auth_session_verifier=")} + encodeURIComponent(verifier),
+        { credentials: "include" }
+      );
+      if (exchange.ok) exchanged = await exchange.json().catch(() => null);
+    }
+    // /token is the endpoint that returns the Neon Auth JWT the API verifies.
     const res = await fetch(${JSON.stringify(authBase + "/token")}, { credentials: "include" });
-    if (!res.ok) throw new Error("no session");
-    const data = await res.json();
-    const token = data.token || data.jwt || (data.data && data.data.token);
-    if (!token) throw new Error("no token");
+    if (res.ok) {
+      const data = await res.json();
+      token = data.token || data.jwt || (data.data && data.data.token);
+    }
+    if (!token && exchanged) {
+      token = (exchanged.session && exchanged.session.token) || exchanged.token || null;
+    }
+    if (!token) {
+      fail("Sign-in could not be completed (HTTP " + res.status + ").");
+      return;
+    }
+    fetch(${JSON.stringify("/auth/report")}, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        reason: "redirect",
+        params: [...qs.keys()],
+        shape: { len: token.length, dots: (token.match(/\\./g) || []).length }
+      })
+    }).catch(() => {});
     location.replace(${JSON.stringify(redirect + "?token=")} + encodeURIComponent(token));
   } catch (e) {
-    document.body.textContent = "Sign-in could not be completed. Please try again.";
+    fail("Sign-in could not be completed (" + (e && e.message ? e.message : "network") + ").");
   }
 })();
 </script></body>`;
   return c.html(html);
+});
+
+/** Diagnostics from the relay page: the reason a browser-side sign-in failed. */
+app.post("/auth/report", async (c) => {
+  const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
+  const reason = String((body as Record<string, unknown>).reason ?? "").slice(0, 300);
+  const params = Array.isArray((body as Record<string, unknown>).params)
+    ? ((body as Record<string, unknown>).params as unknown[]).map(String).slice(0, 20)
+    : [];
+  const rawShape = (body as Record<string, unknown>).shape;
+  const shape = rawShape && typeof rawShape === "object"
+    ? {
+        len: Number((rawShape as Record<string, unknown>).len) || 0,
+        dots: Number((rawShape as Record<string, unknown>).dots) || 0
+      }
+    : undefined;
+  console.log("auth relay", JSON.stringify({ reason, params, shape }));
+  return c.json({ ok: true });
 });
 
 /* ---------------- public scenes ---------------- */
@@ -308,7 +379,11 @@ app.get("/public/scenes", async (c) => {
   const q = (c.req.query("q") ?? "").trim();
   const excludeSaved = c.req.query("excludeSaved") === "true";
 
-  const filters = [eq(publicScenes.isRemoved, false), eq(publicScenes.isOfficial, false)];
+  const filters = [
+    eq(publicScenes.isRemoved, false),
+    eq(publicScenes.isOfficial, false),
+    or(eq(profiles.blocked, false), isNull(profiles.blocked))!
+  ];
   if (q) filters.push(ilike(publicScenes.title, `%${q}%`));
   if (excludeSaved && viewer) filters.push(sql`${publicScenes.id} not in (
     select ${saves.sceneId} from ${saves} where ${saves.userId} = ${viewer.userId}
@@ -393,6 +468,7 @@ app.delete("/public/scenes/:id", async (c) => {
   const row = rows[0];
   if (!row) throw new HttpError(404, "Scene not found");
   if (row.ownerId !== user.userId) throw new HttpError(404, "Scene not found");
+  if (row.locked) throw new HttpError(409, "This scene is locked by a moderator", "LOCKED");
   await db
     .update(publicScenes)
     .set({
@@ -686,10 +762,22 @@ app.post("/admin/login", async (c) => {
 /** Admin routes answer 404 to everyone else, never 403. */
 app.use("/admin/*", async (c, next) => {
   if (c.req.path === "/admin/login") return next();
-  const claims = await verifyAdminToken(bearer(c.req.header("authorization")));
-  if (!claims) return c.json({ error: "Not found" }, 404);
-  c.set("adminEmail", claims.email);
-  return next();
+  const token = bearer(c.req.header("authorization"));
+  const claims = await verifyAdminToken(token);
+  if (claims) {
+    c.set("adminEmail", claims.email);
+    return next();
+  }
+  // The Google account whose email matches ADMIN_EMAIL is an admin too.
+  const user = await verifyUserToken(token).catch(() => null);
+  if (
+    user?.email &&
+    user.email.toLowerCase() === config().ADMIN_EMAIL.toLowerCase()
+  ) {
+    c.set("adminEmail", user.email);
+    return next();
+  }
+  return c.json({ error: "Not found" }, 404);
 });
 
 app.post("/admin/default-scenes", async (c) => {
@@ -807,6 +895,20 @@ app.delete("/admin/public-scenes/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+app.post("/admin/public-scenes/:id/lock", async (c) => {
+  const id = uuid(c.req.param("id"));
+  const body = await jsonBody(c);
+  const locked = Boolean(body.locked);
+  const [row] = await db
+    .update(publicScenes)
+    .set({ locked })
+    .where(eq(publicScenes.id, id))
+    .returning({ id: publicScenes.id, locked: publicScenes.locked });
+  if (!row) throw new HttpError(404, "Scene not found");
+  await writeAudit(locked ? "public_scene.lock" : "public_scene.unlock", "public_scene", id);
+  return c.json({ scene: row });
+});
+
 app.post("/admin/public-scenes/:id/restore", async (c) => {
   const id = uuid(c.req.param("id"));
   const [updated] = await db
@@ -817,6 +919,62 @@ app.post("/admin/public-scenes/:id/restore", async (c) => {
   if (!updated) throw new HttpError(404, "Not found");
   await writeAudit("public_scene.restore", "public_scene", id);
   return c.json({ ok: true });
+});
+
+app.post("/admin/users/:id/block", async (c) => {
+  const id = c.req.param("id");
+  const body = await jsonBody(c);
+  const blocked = Boolean(body.blocked);
+  const [row] = await db
+    .update(profiles)
+    .set({ blocked })
+    .where(eq(profiles.userId, id))
+    .returning({ userId: profiles.userId, channelName: profiles.channelName, blocked: profiles.blocked });
+  if (!row) throw new HttpError(404, "User not found");
+  await writeAudit(blocked ? "user.block" : "user.unblock", "user", id);
+  return c.json({ user: row });
+});
+
+app.get("/admin/dashboard", async (c) => {
+  const removed = await db
+    .select({
+      id: publicScenes.id,
+      title: publicScenes.title,
+      ownerId: publicScenes.ownerId,
+      removedBy: publicScenes.removedBy,
+      removedAt: publicScenes.removedAt,
+    })
+    .from(publicScenes)
+    .where(eq(publicScenes.isRemoved, true))
+    .orderBy(desc(publicScenes.removedAt))
+    .limit(20);
+
+  const blocked = await db
+    .select({
+      userId: profiles.userId,
+      channelName: profiles.channelName,
+      email: profiles.email,
+    })
+    .from(profiles)
+    .where(eq(profiles.blocked, true))
+    .limit(50);
+
+  const reported = await db
+    .select({
+      sceneId: reports.sceneId,
+      reportCount: count(reports.id),
+      reasons: sql<string>`string_agg(distinct ${reports.reason}, ' · ')`,
+      title: publicScenes.title,
+      ownerId: publicScenes.ownerId,
+      isRemoved: publicScenes.isRemoved,
+    })
+    .from(reports)
+    .leftJoin(publicScenes, eq(publicScenes.id, reports.sceneId))
+    .groupBy(reports.sceneId, publicScenes.title, publicScenes.ownerId, publicScenes.isRemoved)
+    .orderBy(desc(count(reports.id)))
+    .limit(20);
+
+  return c.json({ removed, blocked, reports: reported });
 });
 
 app.get("/admin/reports", async (c) => {
