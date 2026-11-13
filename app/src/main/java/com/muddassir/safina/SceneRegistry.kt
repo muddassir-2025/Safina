@@ -332,9 +332,34 @@ class ZikrStore(private val context: Context) {
      * defaults that were deleted move an edited copy to Private rather than
      * destroying the user's work.
      */
-    fun applyRemoteDefaults(items: List<RemoteDefaultScene>) {
+    fun applyRemoteDefaults(
+        items: List<RemoteDefaultScene>,
+        hiddenBundledKeys: List<String> = emptyList()
+    ) {
+        val hidden = hiddenBundledKeys.toSet()
+        // The server is authoritative for bundled retirements: a fresh install
+        // (empty local prefs) learns here which shipped scenes the admin removed.
+        prefs.edit().putStringSet("hidden_defaults", hidden).apply()
+
         val known = items.associateBy { serverDefaultId(it.id) }
         val list = customScenes().toMutableList()
+
+        // Hide bundled defaults the admin retired for everyone.
+        val bundledIterator = list.listIterator()
+        while (bundledIterator.hasNext()) {
+            val meta = bundledIterator.next()
+            val key = meta.defaultKey ?: continue
+            if (!meta.isDefault || BundledScenes.byKey(key) == null || key !in hidden) continue
+            if (meta.modified) {
+                bundledIterator.set(
+                    meta.copy(source = SCENE_SOURCE_PRIVATE, isDefault = false, modified = true)
+                )
+            } else {
+                bundledIterator.remove()
+                deleteHtml(meta.id)
+                deleteThumbnail(meta.id)
+            }
+        }
 
         // Remove server defaults the admin deleted.
         val iterator = list.listIterator()
@@ -382,6 +407,9 @@ class ZikrStore(private val context: Context) {
         }
 
         saveCustomScenes(list)
+        // Restores bundled scenes if the admin un-retired one, and keeps their
+        // shipped titles in sync.
+        ensureBundledDefaults()
     }
 
     private fun isServerDefault(meta: HtmlSceneMeta): Boolean =

@@ -9,6 +9,7 @@ import {
   auditLog,
   collections,
   defaultScenes,
+  hiddenBundledScenes,
   profiles,
   publicScenes,
   reports,
@@ -18,7 +19,9 @@ import {
   bearer,
   signAdminToken,
   signReviewerToken,
+  signSafinaUserToken,
   verifyAdminToken,
+  verifyNeonUserToken,
   verifyUserToken,
   type SceneUser,
 } from "./auth.js";
@@ -248,28 +251,37 @@ app.put("/profile/channel", async (c) => {
  * JWT from Neon Auth and hand it to the app through the `safina://auth` deep
  * link. Keep the JWT out of any other page.
  */
-app.get("/auth/google/start", async (c) => {
+app.get("/auth/google/start", (c) => {
   const cfg = config();
   const authBase = cfg.NEON_AUTH_BASE_URL.replace(/\/$/, "");
   const redirect = c.req.query("redirect") || "safina://auth";
   // Derive the public origin from the request so this works on any host.
   const origin = new URL(c.req.url).origin;
   const callback = `${origin}/auth/callback?redirect=${encodeURIComponent(redirect)}`;
+  // Client-side fetch so Neon Auth's session-challenge cookie is stored in the
+  // browser (a server-side fetch would drop the Set-Cookie and break the
+  // verifier exchange on every device).
+  const html = `<!doctype html><meta charset="utf-8"><title>Signing in…</title>
+<body style="font-family:system-ui;padding:2rem">
+<p>Redirecting to Google…</p>
+<script>
+(async () => {
   try {
-    const res = await fetch(authBase + "/sign-in/social", {
+    const res = await fetch(${JSON.stringify(authBase + "/sign-in/social")}, {
       method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ provider: "google", callbackURL: callback }),
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ provider: "google", callbackURL: ${JSON.stringify(callback)} })
     });
-    const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string };
-    if (data.url) return c.redirect(data.url, 302);
-    throw new HttpError(500, data.message || "Could not start Google sign-in");
+    const data = await res.json();
+    if (data && data.url) { location.replace(data.url); return; }
+    document.body.textContent = (data && data.message) || "Could not start Google sign-in.";
   } catch (e) {
-    if (e instanceof HttpError) throw e;
-    const detail = e instanceof Error ? e.message : String(e);
-    console.error("[auth/google/start] failed", detail);
-    throw new HttpError(500, `Could not start Google sign-in: ${detail}`);
+    document.body.textContent = "Could not start Google sign-in.";
   }
+})();
+</script></body>`;
+  return c.html(html);
 });
 
 app.get("/auth/callback", (c) => {
@@ -336,6 +348,20 @@ app.get("/auth/callback", (c) => {
         shape: { len: token.length, dots: (token.match(/\\./g) || []).length }
       })
     }).catch(() => {});
+    // Exchange the short-lived Neon Auth JWT for a long-lived Safina session
+    // token so sign-in survives app restarts.
+    try {
+      const ex = await fetch(${JSON.stringify("/auth/exchange")}, {
+        method: "POST",
+        headers: { "content-type": "application/json", "Authorization": "Bearer " + token }
+      });
+      if (ex.ok) {
+        const exData = await ex.json().catch(() => ({}));
+        if (exData && exData.token) token = exData.token;
+      }
+    } catch (e) {
+      // Fall back to the Neon token if exchange fails.
+    }
     location.replace(${JSON.stringify(redirect + "?token=")} + encodeURIComponent(token));
   } catch (e) {
     fail("Sign-in could not be completed (" + (e && e.message ? e.message : "network") + ").");
@@ -361,6 +387,15 @@ app.post("/auth/report", async (c) => {
     : undefined;
   console.log("auth relay", JSON.stringify({ reason, params, shape }));
   return c.json({ ok: true });
+});
+
+/* ---------------- session exchange (short-lived Neon JWT -> long-lived) ---------------- */
+
+app.post("/auth/exchange", async (c) => {
+  const neonUser = await verifyNeonUserToken(bearer(c.req.header("authorization")));
+  if (!neonUser) throw new HttpError(401, "Sign in required", "UNAUTHORIZED");
+  const { token, expiresAt } = await signSafinaUserToken(neonUser.userId, neonUser.email);
+  return c.json({ token, expiresAt });
 });
 
 /* ---------------- passwordless (reviewer) sign-in ---------------- */
@@ -720,10 +755,16 @@ app.get("/default-scenes", async (c) => {
     .from(defaultScenes)
     .where(eq(defaultScenes.isActive, true))
     .orderBy(asc(defaultScenes.sortOrder), asc(defaultScenes.createdAt));
+  const hiddenBundled = await db.select().from(hiddenBundledScenes);
 
   const hash = createHash("sha1");
   for (const row of rows) {
     hash.update(`${row.id}:${row.version}:${row.updatedAt.getTime()};`);
+  }
+  // Retiring a bundled scene changes no `default_scenes` row, so it must be
+  // part of the ETag or clients would keep their 304 and never hide it.
+  for (const row of hiddenBundled) {
+    hash.update(`hidden:${row.key};`);
   }
   const etag = `W/"${hash.digest("hex")}"`;
   if (c.req.header("if-none-match") === etag) {
@@ -735,6 +776,7 @@ app.get("/default-scenes", async (c) => {
   return c.json({
     // Client compares this string; it changes whenever a default scene changes.
     version: etag,
+    hiddenBundledKeys: hiddenBundled.map((row) => row.key),
     items: rows.map((row) => ({
       id: row.id,
       title: row.title,
@@ -866,6 +908,26 @@ app.delete("/admin/default-scenes/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+app.post("/admin/default-scenes/hidden-bundled", async (c) => {
+  const body = await jsonBody(c);
+  const key = typeof body.key === "string" ? body.key.trim() : "";
+  if (!/^[a-z0-9_-]{1,64}$/i.test(key)) {
+    throw new HttpError(400, "Invalid bundled scene key", "INVALID_KEY");
+  }
+  const hidden = body.hidden !== false;
+  if (hidden) {
+    await db.insert(hiddenBundledScenes).values({ key }).onConflictDoNothing();
+  } else {
+    await db.delete(hiddenBundledScenes).where(eq(hiddenBundledScenes.key, key));
+  }
+  await writeAudit(
+    hidden ? "default_scene.hide_bundled" : "default_scene.show_bundled",
+    "bundled_scene",
+    key
+  );
+  return c.json({ ok: true, hidden });
+});
+
 app.post("/admin/public-scenes", async (c) => {
   const cfg = config();
   const body = await jsonBody(c);
@@ -917,6 +979,9 @@ app.delete("/admin/public-scenes/:id", async (c) => {
     .where(eq(publicScenes.id, id))
     .returning();
   if (!updated) throw new HttpError(404, "Not found");
+  // Remove the scene from every user's saved list so the deletion propagates.
+  await db.delete(saves).where(eq(saves.sceneId, id));
+  await db.delete(reports).where(eq(reports.sceneId, id));
   await writeAudit("public_scene.remove", "public_scene", id, { reason });
   return c.json({ ok: true });
 });

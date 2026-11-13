@@ -8,4 +8,8 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="ic_launcher_bg">#FFF3EFE3</color>
+    <color name="widget_bg">#FFFFFBF1</color>
+    <color name="widget_stroke">#FFE4E0D4</color>
+    <color name="widget_verse_text">#FF3D453E</color>
+    <color name="widget_dim">#FF6C756D</color>
 </resources>

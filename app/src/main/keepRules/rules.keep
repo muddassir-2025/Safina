@@ -1,4 +1,12 @@
 # Add project specific R8 rules here.
+#
+# Room generates *Database_Impl classes that are created reflectively via
+# Class.getDeclaredConstructor(). Room's own consumer rule keeps the class
+# name but not the constructor, so R8 full mode strips it and WorkManager's
+# startup initializer dies with NoSuchMethodException before the app opens.
+-keepclassmembers class * extends androidx.room.RoomDatabase {
+    <init>();
+}
 # AGP will combine all keep rule files in src/main/keepRules to pass to R8
 #
 # For more details, see

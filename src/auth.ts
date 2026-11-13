@@ -42,7 +42,10 @@ export async function verifyUserToken(token: string | undefined | null): Promise
     // fall through to reviewer token
   }
   // Reviewer (passwordless email) token.
-  return verifyReviewerToken(token);
+  const reviewer = await verifyReviewerToken(token);
+  if (reviewer) return reviewer;
+  // Safina long-lived session token (issued after a successful Neon Auth sign-in).
+  return verifySafinaUserToken(token);
 }
 
 export function bearer(header: string | undefined | null): string | null {
@@ -132,4 +135,61 @@ export async function verifyReviewerToken(token: string | undefined | null): Pro
   } catch {
     return null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Safina long-lived session token (issued after Neon Auth sign-in)    */
+/* ------------------------------------------------------------------ */
+
+const SAFINA_USER_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export async function signSafinaUserToken(
+  userId: string,
+  email: string | null
+): Promise<{ token: string; expiresAt: number }> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = nowSec + SAFINA_USER_TTL_SECONDS;
+  const token = await new SignJWT({ role: "user", email })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setSubject(userId)
+    .setIssuedAt(nowSec)
+    .setIssuer("safina-user")
+    .setAudience("safina-user")
+    .setExpirationTime(exp)
+    .sign(adminKey());
+  return { token, expiresAt: exp * 1000 };
+}
+
+export async function verifySafinaUserToken(token: string | undefined | null): Promise<SceneUser | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, adminKey(), {
+      issuer: "safina-user",
+      audience: "safina-user",
+    });
+    if (typeof payload.sub !== "string") return null;
+    return {
+      userId: payload.sub,
+      email: typeof payload.email === "string" ? payload.email : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Verifies a Neon Auth (EdDSA) token only — used by /auth/exchange. */
+export async function verifyNeonUserToken(token: string | undefined | null): Promise<SceneUser | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, jwks(), { issuer: issuer() });
+    if (payload.sub) {
+      return {
+        userId: payload.sub,
+        email: typeof payload.email === "string" ? payload.email : null,
+      };
+    }
+  } catch {
+    // not a Neon token
+  }
+  return null;
 }

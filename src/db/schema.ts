@@ -95,6 +95,16 @@ export const defaultScenes = pgTable("default_scenes", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Bundled scenes are shipped in the APK, so their removal cannot be a row in
+ * `default_scenes`. This table is the admin's global "retired" list: every
+ * client hides these keys on its next defaults sync, including fresh installs.
+ */
+export const hiddenBundledScenes = pgTable("hidden_bundled_scenes", {
+  key: text("key").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
   action: text("action").notNull(),

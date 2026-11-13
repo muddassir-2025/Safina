@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quran Reminder — a small label, then the verse.
+
+     THE LABEL IS BACK, THE CHIPS AND THE CITATION ARE NOT
+
+     The type is labelled because a bare sentence on a home screen is ambiguous:
+     the reader has to spend a beat working out what they are looking at. A
+     two-word label at 10sp costs about one line's height and settles it.
+
+     What did NOT come back is the title row's old contents — the Copy and
+     Refresh chips, and the "Quran 7:51 · Al-Araaf  51/206" line pinned to the
+     bottom. Those were three bands on a short card and the verse paid for all of
+     them. The citation and position are still shown, one tap away on the verse
+     screen this card opens — which is also where Copy and Share live.
+
+     WHAT HAPPENS WHEN THE VERSE IS TOO LONG
+
+     `autoSizeTextType="uniform"` shrinks it until it fits, 9sp to 15sp, so a
+     verse that is slightly too long is drawn a size smaller instead of losing
+     its last lines. If it still does not fit at the smallest size,
+     `ellipsize="end"` ends the last line with an ellipsis at `maxLines`. That
+     order matters: the ellipsis is the backstop AFTER shrinking, not the first
+     resort. Tapping the card opens the full verse, which is what the ellipsis
+     promises.
+
+     The verse takes `layout_weight="1"` — everything the label does not — and is
+     centred, so a short verse sits in the middle of the card rather than at the
+     top of it.
+
+     A LinearLayout because RemoteViews supports a fixed set of layouts and this
+     needs a label stacked over text, which is the one thing LinearLayout is for. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_quran_reminder_bg"
+    android:orientation="vertical"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/widget_quran_reminder_title"
+        android:textAllCaps="true"
+        android:textColor="@color/widget_dim"
+        android:textSize="10sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_verse_text"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:autoSizeMaxTextSize="15sp"
+        android:autoSizeMinTextSize="9sp"
+        android:autoSizeStepGranularity="1sp"
+        android:autoSizeTextType="uniform"
+        android:ellipsize="end"
+        android:fontFamily="serif"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:lineSpacingExtra="2dp"
+        android:maxLines="5"
+        android:textColor="@color/widget_verse_text"
+        android:textSize="15sp" />
+</LinearLayout>

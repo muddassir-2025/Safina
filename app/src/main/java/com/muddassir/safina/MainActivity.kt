@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         enableEdgeToEdge()
         Analytics.init(applicationContext)
+        CloudSession.init(applicationContext)
         handleAuthIntent(intent)
         setContent { ZikrApp() }
     }
@@ -101,12 +102,26 @@ fun ZikrApp() {
     var editorTarget by remember { mutableStateOf<Zikr?>(null) }
     var htmlVersion by remember { mutableIntStateOf(0) }
     var thumbVersion by remember { mutableIntStateOf(0) }
+    var quranOpenRequest by remember { mutableStateOf(false) }
 
     // Seed the bundled default scenes once, on first launch.
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { store.ensureBundledDefaults() }
         uploaded = store.pickerScenes()
         htmlVersion++
+        // Keep the default scene tab current for everyone, not only when the
+        // admin (or a user) happens to open Scene Studio. Fails silently offline.
+        runCatching { Api.defaultScenes(store.defaultsEtag) }.onSuccess { result ->
+            if (!result.notModified) {
+                withContext(Dispatchers.IO) {
+                    store.applyRemoteDefaults(result.items, result.hiddenBundledKeys)
+                }
+                store.defaultsEtag = result.version
+                uploaded = store.pickerScenes()
+                htmlVersion++
+                thumbVersion++
+            }
+        }
     }
 
     var profileOpen by remember { mutableStateOf(false) }
@@ -116,6 +131,7 @@ fun ZikrApp() {
     // After a Google sign-in, ask for the channel name once.
     LaunchedEffect(CloudSession.token) {
         if (!CloudSession.signedIn) return@LaunchedEffect
+        withContext(Dispatchers.IO) { CloudSession.upgradeSession() }
         withContext(Dispatchers.IO) { CloudSession.refreshProfile() }
         Analytics.signedIn("google")
         if (CloudSession.token != null && CloudSession.profile?.channelName.isNullOrBlank()) channelSheetOpen = true
@@ -283,8 +299,14 @@ fun ZikrApp() {
         onToggleDarkMode = {
             darkMode = !darkMode
             store.darkModeOverride = darkMode
+            com.muddassir.safina.quran.widget.QuranReminderWidgetProvider
+                .refreshAllWidgets(context)
         },
         onStudio = { screen = AppScreen.Studio },
+        onQuran = {
+            screen = AppScreen.Dashboard
+            quranOpenRequest = true
+        },
         signedIn = CloudSession.signedIn,
         identity = (CloudSession.profile?.channelName ?: CloudSession.profile?.email ?: CloudSession.emailUser)
             ?.let { if (CloudSession.isAdmin) "$it (admin)" else it },
@@ -328,7 +350,9 @@ fun ZikrApp() {
                     },
                     onOpenScenes = { screen = AppScreen.Studio },
                     settings = baseSettings,
-                    thumbVersion = thumbVersion
+                    thumbVersion = thumbVersion,
+                    quranOpenRequest = quranOpenRequest,
+                    onQuranRequestHandled = { quranOpenRequest = false }
                 )
 
                 AppScreen.Session -> SessionScreen(

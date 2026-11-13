@@ -407,6 +407,7 @@ data class SettingsActions(
     val onToggleVibration: () -> Unit,
     val onToggleDarkMode: () -> Unit,
     val onStudio: () -> Unit,
+    val onQuran: () -> Unit = {},
     val onHome: (() -> Unit)? = null,
     val signedIn: Boolean = false,
     val identity: String? = null,
@@ -503,6 +504,10 @@ fun SettingsMenu(
                             .height(1.dp)
                             .background(SafinaInk.copy(alpha = 0.07f))
                     )
+                    ActionRow("Quran") {
+                        open = false
+                        actions.onQuran()
+                    }
                     ActionRow("Scene studio") {
                         open = false
                         actions.onStudio()

@@ -116,6 +116,9 @@ fun SceneStudioHost(
 
     var libraryVersion by remember { mutableIntStateOf(0) }
     var publicRefresh by remember { mutableIntStateOf(0) }
+    // Local copy of the host's counter: a freshly captured public thumbnail must
+    // reload the cards here, and the host only owns the initial value.
+    var thumbVersionState by remember { mutableIntStateOf(thumbVersion) }
     var tab by remember { mutableStateOf(StudioTab.Default) }
     var query by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
@@ -139,7 +142,7 @@ fun SceneStudioHost(
     var deleteDefaultTarget by remember { mutableStateOf<RemoteDefaultScene?>(null) }
     var nativePreview by remember { mutableStateOf<NativeDefault?>(null) }
 
-    val scenes = remember(libraryVersion, thumbVersion) { store.customScenes() }
+    val scenes = remember(libraryVersion, thumbVersionState) { store.customScenes() }
     val defaults = remember(scenes) {
         scenes.filter { it.isDefault && it.source == SCENE_SOURCE_DEFAULT }
             .sortedBy { meta -> BundledScenes.byKey(meta.defaultKey)?.sortOrder ?: 100 }
@@ -148,6 +151,16 @@ fun SceneStudioHost(
         scenes.filter { it.source == SCENE_SOURCE_PRIVATE }.sortedByDescending { it.addedAt }
     }
     val savedPublic = remember(scenes) { scenes.filter { it.source == SCENE_SOURCE_PUBLIC } }
+
+    // Public scenes cached on this device have their HTML here, so their card can
+    // show the scene itself instead of the gradient placeholder. Runs one at a
+    // time and only while a thumbnail is missing.
+    ThumbnailHarvester(
+        scenes = savedPublic,
+        store = store,
+        version = thumbVersionState,
+        onCaptured = { thumbVersionState++ }
+    )
 
     fun refresh() {
         libraryVersion++
@@ -159,12 +172,13 @@ fun SceneStudioHost(
     }
 
     /* ---------------- default scene sync (fails silently offline) ---------------- */
-    LaunchedEffect(Unit) {
+    suspend fun syncDefaults(force: Boolean = false) {
         try {
-            val etag = store.defaultsEtag
-            val result = Api.defaultScenes(etag)
+            val result = Api.defaultScenes(if (force) null else store.defaultsEtag)
             if (!result.notModified) {
-                store.applyRemoteDefaults(result.items)
+                withContext(Dispatchers.IO) {
+                    store.applyRemoteDefaults(result.items, result.hiddenBundledKeys)
+                }
                 store.defaultsEtag = result.version
                 refresh()
             }
@@ -172,6 +186,8 @@ fun SceneStudioHost(
             // Render free tier may be asleep. Bundled scenes remain untouched.
         }
     }
+
+    LaunchedEffect(Unit) { syncDefaults() }
 
     /* ---------------- file picker ---------------- */
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -243,6 +259,34 @@ fun SceneStudioHost(
     }
 
     fun saveReplacement(meta: HtmlSceneMeta, bytes: ByteArray) {
+        // An admin replacing a default scene is publishing a new default, not
+        // editing only this phone's copy.
+        val token = AdminSession.authToken
+        if (AdminSession.active && meta.isDefault && token != null) {
+            val bundledKey = meta.defaultKey?.takeIf { BundledScenes.byKey(it) != null }
+            scope.launch {
+                try {
+                    if (bundledKey != null) {
+                        Api.adminAddDefault(
+                            token,
+                            meta.name,
+                            bytes.decodeToString(),
+                            BundledScenes.byKey(bundledKey)?.sortOrder ?: 100
+                        )
+                        Api.adminSetBundledHidden(token, bundledKey, true)
+                        store.hideDefaultScene(meta)
+                    } else {
+                        Api.adminUpdateDefault(token, meta.defaultKey ?: "", meta.name, bytes.decodeToString(), 100)
+                    }
+                    store.defaultsEtag = null
+                    syncDefaults(force = true)
+                    toast(context, "Updated for everyone")
+                } catch (e: Exception) {
+                    toast(context, readableError(e))
+                }
+            }
+            return
+        }
         if (store.saveHtml(meta.id, bytes)) {
             store.deleteThumbnail(meta.id)
             if (meta.isDefault) store.updateSceneMeta(meta.id) { it.copy(modified = true) }
@@ -378,7 +422,7 @@ fun SceneStudioHost(
         nativeDefaults = nativeDefaults,
         privateScenes = privateScenes,
         savedPublic = savedPublic,
-        thumbVersion = thumbVersion,
+        thumbVersion = thumbVersionState,
         publicRefresh = publicRefresh,
         onBack = onBack,
         onInfo = { infoOpen = true },
@@ -409,7 +453,8 @@ fun SceneStudioHost(
             } else scope.launch {
                 try {
                     Api.adminUpdateDefault(token, serverId, meta.name, html, 100)
-                    refresh()
+                    store.defaultsEtag = null
+                    syncDefaults(force = true)
                     toast(context, "Updated for everyone")
                 } catch (e: Exception) {
                     toast(context, readableError(e))
@@ -417,17 +462,43 @@ fun SceneStudioHost(
             }
         },
         onAdminDeleteLocalDefault = { meta ->
-            if (meta.defaultKey != null && BundledScenes.byKey(meta.defaultKey) != null) {
-                store.hideDefaultScene(meta)
-                refresh()
-                toast(context, "Removed from Default")
+            val bundledKey = meta.defaultKey
+            if (bundledKey != null && BundledScenes.byKey(bundledKey) != null) {
+                scope.launch {
+                    val token = AdminSession.authToken
+                    if (token == null) {
+                        toast(context, "Admin sign-in required")
+                        return@launch
+                    }
+                    try {
+                        // Global retirement: the server key is what reaches other
+                        // installs, including a fresh one with empty prefs.
+                        Api.adminSetBundledHidden(token, bundledKey, true)
+                        store.hideDefaultScene(meta)
+                        store.defaultsEtag = null
+                        syncDefaults(force = true)
+                        refresh()
+                        toast(context, "Removed for everyone")
+                    } catch (e: Exception) {
+                        toast(context, readableError(e))
+                    }
+                }
             } else {
                 scope.launch {
-                    val token = AdminSession.authToken ?: return@launch
-                    runCatching { Api.adminDeleteDefault(token, meta.defaultKey ?: "") }
-                    store.removeCustomScene(meta.id)
-                    refresh()
-                    toast(context, "Default scene deleted")
+                    val token = AdminSession.authToken
+                    if (token == null) {
+                        toast(context, "Admin sign-in required")
+                        return@launch
+                    }
+                    try {
+                        Api.adminDeleteDefault(token, meta.defaultKey ?: "")
+                        store.defaultsEtag = null
+                        syncDefaults(force = true)
+                        refresh()
+                        toast(context, "Default scene deleted")
+                    } catch (e: Exception) {
+                        toast(context, readableError(e))
+                    }
                 }
             }
         },
@@ -529,12 +600,16 @@ fun SceneStudioHost(
                     }
                     target == UploadTarget.AdminDefault -> scope.launch {
                         val token = AdminSession.authToken ?: return@launch
-                        runCatching {
-                            Api.adminAddDefault(token, title, data.decodeToString(), 100 + defaults.size)
-                        }
                         pendingBytes = null
                         uploadTarget = null
-                        toast(context, "Added to Default scenes")
+                        try {
+                            Api.adminAddDefault(token, title, data.decodeToString(), 100 + defaults.size)
+                            store.defaultsEtag = null
+                            syncDefaults(force = true)
+                            toast(context, "Added for everyone")
+                        } catch (e: Exception) {
+                            toast(context, readableError(e))
+                        }
                     }
                     target == UploadTarget.AdminPublic -> scope.launch {
                         val token = AdminSession.authToken ?: return@launch
@@ -607,7 +682,8 @@ fun SceneStudioHost(
             onSave = { scene -> savePublic(scene, null) },
             onUnsave = { scene -> unsavePublic(scene) },
             onReport = { scene -> reportTarget = scene },
-            onRefresh = { refresh(); publicRefresh++ }
+            onRefresh = { refresh(); publicRefresh++ },
+            onThumbnailCaptured = { thumbVersionState++ }
         )
     }
 
@@ -663,9 +739,15 @@ fun SceneStudioHost(
                 TextButton(onClick = {
                     scope.launch {
                         val token = AdminSession.authToken ?: return@launch
-                        runCatching { Api.adminDeleteDefault(token, remote.id) }
+                        try {
+                            Api.adminDeleteDefault(token, remote.id)
+                            store.defaultsEtag = null
+                            syncDefaults(force = true)
+                            toast(context, "Default scene deleted")
+                        } catch (e: Exception) {
+                            toast(context, readableError(e))
+                        }
                         deleteDefaultTarget = null
-                        toast(context, "Default scene deleted")
                     }
                 }) { Text("Delete", color = Color(0xFF9A4A3E)) }
             },
@@ -1315,7 +1397,8 @@ private fun ScenePreviewOverlay(
     onSave: (PublicScene) -> Unit,
     onUnsave: (PublicScene) -> Unit,
     onReport: (PublicScene) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onThumbnailCaptured: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var html by remember(target.id) { mutableStateOf<String?>(null) }
@@ -1369,7 +1452,15 @@ private fun ScenePreviewOverlay(
                     tapX = tapPoint.x,
                     tapY = tapPoint.y,
                     paused = false,
-                    onError = { failed = true }
+                    onError = { failed = true },
+                    captureFrame = true,
+                    onSnapshot = { dataUrl ->
+                        decodePngDataUrl(dataUrl)?.let { bytes ->
+                            if (store.saveThumbnail(target.id, bytes)) {
+                                onThumbnailCaptured()
+                            }
+                        }
+                    }
                 )
             }
         }

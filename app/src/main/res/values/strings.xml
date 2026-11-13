@@ -1,3 +1,139 @@
 <resources>
     <string name="app_name">Safina</string>
+
+    <!-- Quran card and reader -->
+    <string name="widget_quran_reminder_title">Quran Reminder</string>
+    <string name="widget_quran_reminder_description">A daily Quran verse to encourage reflection</string>
+    <string name="widget_quran_loading">Loading a verse…</string>
+    <string name="quran_verse_header">Quran</string>
+    <string name="quran_verse_unavailable">Verses are being downloaded. Check back in a moment.</string>
+    <string name="quran_tab">Quran</string>
+    <string name="quran_share_via">Share verse via</string>
+    <string name="quran_bookmark">Bookmark</string>
+    <string name="quran_bookmarked">Verse bookmarked</string>
+    <string name="quran_bookmark_removed">Bookmark removed</string>
+    <string name="quran_bookmark_remove">Remove bookmark</string>
+    <string name="quran_verse_new">New Verse</string>
+    <string name="quran_verse_copy">Copy verse</string>
+    <string name="quran_verse_listen">Listen</string>
+    <string name="quran_verse_listen_pause">Pause</string>
+    <string name="quran_verse_listen_resume">Resume</string>
+    <string name="quran_verse_listen_replay">Replay</string>
+    <string name="quran_verse_listen_restart">Restart</string>
+    <string name="quran_verse_listen_loading">Loading recitation…</string>
+    <string name="quran_verse_listen_failed">Could not load the recitation. Check your connection and try again.</string>
+    <string name="quran_verse_previous">Previous</string>
+    <string name="quran_verse_next">Next</string>
+    <string name="quran_verse_copied">Verse copied to clipboard</string>
+    <string name="quran_verse_refresh_frequency">New verse every</string>
+    <string name="quran_verse_hour_short">%1$d hr</string>
+    <string name="quran_verse_reference">Quran %1$d:%2$d</string>
+    <string name="quran_ayah_progress">%1$d / %2$d ayahs</string>
+    <string name="quran_ayah_progress_desc">Ayah %1$d of %2$d in this surah</string>
+    <string name="quran_ayah_progress_short">%1$d/%2$d</string>
+    <string name="quran_ayah_reference">Surah %1$d · Ayah %2$d</string>
+    <string name="quran_ayah_reference_of">Surah %1$d · Ayah %2$d of %3$d</string>
+    <string name="quran_settings_title">Quran settings</string>
+    <string name="quran_notifications_title">Notifications</string>
+    <string name="quran_notifications">Quran Reminders</string>
+    <string name="quran_notifications_note">Get a notification when a new verse is chosen</string>
+    <string name="quran_notification_channel">Quran reminders</string>
+    <string name="quran_notification_channel_desc">New verse notifications</string>
+    <string name="quran_new_verse_notification_title">New verse · %1$s</string>
+    <string name="media_notification_permission_denied">Notifications are blocked. Allow them in Settings to receive reminders.</string>
+
+    <!-- Quran search -->
+    <string name="quran_search">Search Quran</string>
+    <string name="quran_search_back">Back</string>
+    <string name="quran_search_hint">Word or verse (2:55)</string>
+    <string name="quran_search_clear">Clear search</string>
+    <string name="quran_search_idle">Type above to search the Quran</string>
+    <string name="quran_search_no_results">No verses found</string>
+    <string name="quran_search_loading">Searching…</string>
+    <string name="quran_search_mode_search">Search</string>
+    <string name="quran_search_mode_surah">Surah</string>
+    <string name="quran_search_mode_bookmarks">Bookmarks</string>
+    <string name="quran_search_hint_surah">Surah name or number</string>
+    <string name="quran_search_hint_in_surah">Search inside this surah</string>
+    <string name="quran_surah_no_matches">No surahs found</string>
+    <plurals name="quran_surah_verses_count">
+        <item quantity="one">%1$d verse</item>
+        <item quantity="other">%1$d verses</item>
+    </plurals>
+    <plurals name="quran_surah_matches_count">
+        <item quantity="one">%1$d of %2$d verses matches</item>
+        <item quantity="other">%1$d of %2$d verses match</item>
+    </plurals>
+    <string name="quran_bookmarks_loading">Loading bookmarks…</string>
+    <string name="quran_reader_search">Search inside this surah</string>
+    <string name="quran_reader_meta">Surah %1$d • %2$d ayahs</string>
+    <string name="quran_reader_arabic">Arabic</string>
+    <string name="quran_reader_english">English</string>
+    <string name="quran_reader_matches_next">Next match</string>
+    <string name="quran_reader_auto_scroll">Auto scroll</string>
+    <string name="quran_reader_scroll_top">Back to top of surah</string>
+    <string name="quran_reader_header_hide">Hide surah details</string>
+    <string name="quran_reader_header_show">Show surah details</string>
+    <string name="quran_scroll_speed">Scroll speed</string>
+    <string name="quran_scroll_off">Off</string>
+    <string name="quran_scroll_slow">Slow</string>
+    <string name="quran_scroll_normal">Normal</string>
+    <string name="quran_scroll_fast">Fast</string>
+    <plurals name="quran_search_results_count">
+        <item quantity="one">%1$d result</item>
+        <item quantity="other">%1$d results</item>
+    </plurals>
+    <string name="quran_bookmarks_search_hint">Filter bookmarks</string>
+    <string name="quran_bookmarks_empty">No bookmarks yet. Tap the bookmark icon on a verse to save it here.</string>
+    <string name="quran_bookmarks_no_match">No bookmarks match your filter</string>
+    <string name="quran_bookmarks_remove">Remove bookmark</string>
+    <plurals name="quran_surah_bookmarks_count">
+        <item quantity="one">%1$d surah</item>
+        <item quantity="other">%1$d surahs</item>
+    </plurals>
+    <string name="quran_surah_star">Save surah</string>
+    <string name="quran_surah_unstar">Remove saved surah</string>
+    <string name="quran_surah_bookmarks_empty">No saved surahs yet. Tap the star on a surah to keep it here.</string>
+    <string name="quran_surah_bookmarks_remove_confirm_title">Remove saved surah?</string>
+    <string name="quran_surah_bookmarks_remove_confirm_text">%1$s will be removed from your bookmarks. The verses you saved from it stay.</string>
+    <string name="quran_bookmarks_remove_confirm_title">Remove bookmark?</string>
+    <string name="quran_bookmarks_remove_confirm_text">This verse will be removed from your bookmarks.</string>
+    <string name="quran_bookmarks_remove_confirm">Remove</string>
+    <string name="quran_cancel">Cancel</string>
+    <plurals name="quran_bookmarks_count">
+        <item quantity="one">%1$d verse</item>
+        <item quantity="other">%1$d verses</item>
+    </plurals>
+
+    <!-- Islamic date -->
+    <string name="quran_islamic_date_adjust">Adjust Islamic date</string>
+    <string name="islamic_date_adjustment_title">Islamic Date Adjustment</string>
+    <string name="islamic_date_adjustment_minus">−1 day</string>
+    <string name="islamic_date_adjustment_default">Default</string>
+    <string name="islamic_date_adjustment_plus">+1 day</string>
+    <string name="islamic_date_zero_days">0 days</string>
+    <string name="islamic_date_current">Current adjustment: %1$s</string>
+    <string name="islamic_date_note">Islamic dates may vary by country and moon sighting. Adjust ±1 day if needed.</string>
+
+    <!-- Quran settings -->
+    <string name="quran_settings_section_quran">Quran / New Verse</string>
+    <string name="quran_settings_arabic_size">Arabic text size</string>
+    <string name="quran_settings_arabic_size_note">Sizes the verse, surah reader and basmala together. Quranic marks scale with the letters.</string>
+    <string name="quran_text_size_percent">%1$d%%</string>
+    <string name="quran_arabic_text_appearance">Arabic text size</string>
+    <string name="quran_done">Done</string>
+    <string name="quran_card_close">Close Quran</string>
+    <string name="quran_card_listen">Recitation</string>
+    <plurals name="quran_verse_interval_set">
+        <item quantity="one">New verse every %1$d hour</item>
+        <item quantity="other">New verse every %1$d hours</item>
+    </plurals>
+    <plurals name="quran_verse_refresh_note_hours">
+        <item quantity="one">Refreshes automatically every %1$d hour · works offline</item>
+        <item quantity="other">Refreshes automatically every %1$d hours · works offline</item>
+    </plurals>
+    <string name="quran_settings_warmth">Warmth</string>
+    <string name="quran_detail_title">Verse</string>
+    <string name="quran_detail_saved">Saved</string>
+    <string name="quran_detail_set_current">Show on Quran card</string>
 </resources>

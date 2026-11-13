@@ -83,7 +83,12 @@ data class ReportedScene(
     val lastReportedAt: Long
 )
 
-data class DefaultsResult(val notModified: Boolean, val version: String?, val items: List<RemoteDefaultScene>)
+data class DefaultsResult(
+    val notModified: Boolean,
+    val version: String?,
+    val items: List<RemoteDefaultScene>,
+    val hiddenBundledKeys: List<String> = emptyList()
+)
 
 object Api {
     private val jsonType = "application/json; charset=utf-8".toMediaType()
@@ -319,13 +324,27 @@ object Api {
                     version = o.optInt("version", 1)
                 )
             }
-            DefaultsResult(false, root.optString("version").ifBlank { null }, items)
+            val hiddenArr = root.optJSONArray("hiddenBundledKeys") ?: JSONArray()
+            val hidden = (0 until hiddenArr.length()).map { hiddenArr.optString(it) }
+                .filter { it.isNotBlank() }
+            DefaultsResult(
+                notModified = false,
+                version = root.optString("version").ifBlank { null },
+                items = items,
+                hiddenBundledKeys = hidden
+            )
         } catch (e: ApiException) {
             if (e.status == 304) DefaultsResult(true, null, emptyList()) else throw e
         }
     }
 
     /* ---------------- admin ---------------- */
+
+    suspend fun exchangeToken(token: String): String = withColdStartRetry {
+        val root = obj("POST", "/auth/exchange", token = token)
+            ?: throw ApiException(0, "Empty response")
+        root.optString("token").ifBlank { throw ApiException(0, "Sign-in failed") }
+    }
 
     suspend fun reviewLogin(email: String): String = withColdStartRetry {
         val root = obj(
@@ -373,6 +392,19 @@ object Api {
 
     suspend fun adminDeleteDefault(token: String, id: String): Unit = withColdStartRetry {
         obj("DELETE", "/admin/default-scenes/${Uri.encode(id)}", admin = token)
+        Unit
+    }
+
+    /**
+     * Retires (or restores) a bundled default for every install. Bundled HTML
+     * lives in the APK, so the server stores only the key; the next defaults
+     * sync tells each client to hide it.
+     */
+    suspend fun adminSetBundledHidden(token: String, key: String, hidden: Boolean): Unit = withColdStartRetry {
+        obj(
+            "POST", "/admin/default-scenes/hidden-bundled", admin = token,
+            body = JSONObject().put("key", key).put("hidden", hidden)
+        )
         Unit
     }
 
@@ -566,6 +598,21 @@ object CloudSession {
         return true
     }
 
+    /** Swaps a short-lived Neon Auth JWT for a long-lived Safina session JWT. */
+    suspend fun upgradeSession() {
+        val current = token ?: return
+        if (isSafinaSessionToken(current)) return
+        try {
+            val jwt = Api.exchangeToken(current)
+            if (jwt.isNotBlank() && !jwtExpired(jwt)) {
+                token = jwt
+                prefs?.edit()?.putString(KEY_TOKEN, jwt)?.apply()
+            }
+        } catch (_: Exception) {
+            // Keep the existing token if exchange fails.
+        }
+    }
+
     suspend fun refreshProfile() {
         val current = token ?: return
         busy = true
@@ -636,8 +683,21 @@ fun jwtExpired(jwt: String): Boolean {
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
         val exp = JSONObject(bytes.decodeToString()).optLong("exp", 0L)
-        exp <= (System.currentTimeMillis() / 1000) + 5
+        // Allow a small clock skew so a device with a slightly fast clock
+        // does not discard a still-valid token.
+        exp <= (System.currentTimeMillis() / 1000) - 300
     }.getOrDefault(true)
+}
+
+fun isSafinaSessionToken(jwt: String): Boolean {
+    val payload = jwt.split('.').getOrNull(1) ?: return false
+    return runCatching {
+        val bytes = android.util.Base64.decode(
+            payload + "=".repeat((4 - payload.length % 4) % 4),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+        )
+        JSONObject(bytes.decodeToString()).optString("iss") == "safina-user"
+    }.getOrDefault(false)
 }
 
 fun jwtExpiryMillis(jwt: String): Long {

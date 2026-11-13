@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quran Reminder — defaults to 4x1, and RESIZEABLE in both directions.
+
+     Width FIRST, then height, matching `targetCellWidth`/`targetCellHeight`.
+     Four cells across and one tall is a wide, short band: enough width for a line
+     of the verse before `autoSizeTextType` has to shrink anything, and the height
+     of a single row so it takes a strip of the home screen rather than a block of
+     it. That is the size this card is designed around — the label and one to two
+     lines of verse.
+
+     A reader who wants the rest of a long verse drags the card taller, which is
+     what `resizeMode="horizontal|vertical"` is for. It used to be fixed ("none"),
+     on the reasoning that a launcher should not be able to shrink a card into
+     illegibility — but that made the size an accident of what the launcher chose
+     at placement time, with no way to ask for more of a verse. Resizable is the
+     better trade: the verse shrinks and then ellipsizes (see the layout), so a
+     small card degrades rather than breaks.
+
+     `targetCellWidth`/`targetCellHeight` are what Android 12+ reads to place it;
+     the `minWidth`/`minHeight` pair is the fallback every older launcher uses, at
+     the classic formula for those cells (70dp x n - 30dp):
+       width  4 cells -> 250dp
+       height 1 cell  -> 40dp -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_quran_reminder"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_quran_reminder_description"
+    android:previewLayout="@layout/widget_quran_reminder"
+    tools:targetApi="31" />

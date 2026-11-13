@@ -2,10 +2,13 @@ package com.muddassir.safina
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -38,7 +41,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -50,9 +56,11 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -73,6 +81,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.muddassir.safina.quran.ui.QuranCollapsedCard
+import com.muddassir.safina.quran.ui.QuranExpandedOverlay
+import com.muddassir.safina.quran.ui.rememberQuranHubState
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -93,7 +104,9 @@ fun DashboardScreen(
     onReorder: (Int, Int) -> Unit,
     onOpenScenes: () -> Unit,
     settings: SettingsActions,
-    thumbVersion: Int
+    thumbVersion: Int,
+    quranOpenRequest: Boolean = false,
+    onQuranRequestHandled: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
@@ -110,7 +123,24 @@ fun DashboardScreen(
     }
 
     AppBackdrop(time) {
-        Column(Modifier.fillMaxSize()) {
+        val quranState = rememberQuranHubState()
+        var quranExpanded by rememberSaveable { mutableStateOf(false) }
+
+        // Safina's own settings sheet can ask for the Quran menu from anywhere.
+        // The request is consumed so a later return to the dashboard does not
+        // reopen the Quran on its own.
+        LaunchedEffect(quranOpenRequest) {
+            if (quranOpenRequest) {
+                quranExpanded = true
+                onQuranRequestHandled()
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .then(if (quranExpanded) Modifier.blur(18.dp) else Modifier)
+        ) {
             Column(Modifier.statusBarsPadding().padding(start = 24.dp, end = 24.dp, top = 18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -128,6 +158,15 @@ fun DashboardScreen(
                             letterSpacing = 0.2.sp
                         )
                     }
+                    DashboardIcon(label = "Quran", onClick = { quranExpanded = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            tint = SafinaInk.copy(alpha = 0.8f),
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
                     DashboardIcon(label = "Search", onClick = {
                         searching = !searching
                         if (!searching) query = ""
@@ -176,7 +215,15 @@ fun DashboardScreen(
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (cards.isEmpty()) {
-                    EmptyDashboard(onNew = onNew)
+                    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+                        QuranCollapsedCard(
+                            state = quranState,
+                            onExpand = { quranExpanded = true }
+                        )
+                        Box(Modifier.weight(1f)) {
+                            EmptyDashboard(onNew = onNew)
+                        }
+                    }
                 } else if (visible.isEmpty()) {
                     Column(
                         Modifier.fillMaxSize().padding(32.dp),
@@ -197,6 +244,11 @@ fun DashboardScreen(
                         uploaded = uploaded,
                         thumbVersion = thumbVersion,
                         draggable = query.isBlank(),
+                        quranCard = if (query.isBlank()) {
+                            { QuranCollapsedCard(quranState, onExpand = { quranExpanded = true }) }
+                        } else {
+                            null
+                        },
                         onOpen = onOpen,
                         onEdit = onEdit,
                         onDelete = { deleteTarget = it },
@@ -205,6 +257,20 @@ fun DashboardScreen(
                 }
             }
 
+        }
+        AnimatedVisibility(
+            visible = quranExpanded,
+            enter = fadeIn(tween(180)) + scaleIn(
+                initialScale = 0.92f,
+                animationSpec = tween(260)
+            ),
+            exit = fadeOut(tween(160)) + scaleOut(
+                targetScale = 0.94f,
+                animationSpec = tween(200)
+            )
+        ) {
+            QuranExpandedOverlay(quranState) { quranExpanded = false }
+        }
         }
 
         deleteTarget?.let { z ->
@@ -397,6 +463,7 @@ private fun ReorderableCardList(
     uploaded: List<HtmlSceneMeta>,
     thumbVersion: Int,
     draggable: Boolean,
+    quranCard: (@Composable () -> Unit)? = null,
     onOpen: (Zikr) -> Unit,
     onEdit: (Zikr) -> Unit,
     onDelete: (Zikr) -> Unit,
@@ -417,6 +484,11 @@ private fun ReorderableCardList(
         ),
         verticalArrangement = Arrangement.spacedBy(CardGap)
     ) {
+        quranCard?.let { card ->
+            item(key = "quran-card") {
+                Box(Modifier.padding(top = 2.dp, bottom = 2.dp)) { card() }
+            }
+        }
         itemsIndexed(cards, key = { _, z -> z.id }) { index, z ->
             val isDragged = draggingId == z.id
             val count = counts[z.id] ?: z.count
